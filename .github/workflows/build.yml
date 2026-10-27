@@ -1,4 +1,5 @@
-name: Black Web - Prueba inicial
+
+name: BLACK Web - Etapa 2 SDL3
 
 on:
   workflow_dispatch:
@@ -6,17 +7,17 @@ on:
     branches:
       - web-port
     paths:
-      - "web-probe/**"
-      - ".github/workflows/web-probe.yml"
+      - "web-sdl3/**"
+      - ".github/workflows/web-sdl3.yml"
 
 permissions:
   contents: read
 
 jobs:
-  build-web-probe:
-    name: Compilar prueba WebAssembly
+  build-sdl3-web:
+    name: Probar SDL3 en navegador
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Descargar repositorio
@@ -25,22 +26,21 @@ jobs:
       - name: Preparar Emscripten
         uses: mymindstorm/setup-emsdk@v14
 
-      - name: Verificar compilador
-        run: emcc --version
+      - name: Descargar SDL3
+        run: |
+          git clone --depth 1 --branch release-3.2.10 https://github.com/libsdl-org/SDL.git third_party/SDL
 
       - name: Compilar prueba web
         run: |
-          mkdir -p dist
-          emcc web-probe/main.cpp \
-            -O2 \
-            -sALLOW_MEMORY_GROWTH=1 \
-            --shell-file web-probe/shell.html \
-            -o dist/index.html
+          emcmake cmake -S web-sdl3 -B build-web \
+            -DSDL3_SOURCE_DIR="${GITHUB_WORKSPACE}/third_party/SDL" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-web --parallel 2
 
-      - name: Publicar artefacto de prueba
+      - name: Publicar resultado
         uses: actions/upload-artifact@v4
         with:
-          name: black-web-probe
-          path: dist/
+          name: black-web-sdl3
+          path: build-web/dist/
           if-no-files-found: error
           retention-days: 7
