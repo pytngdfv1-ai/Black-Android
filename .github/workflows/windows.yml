@@ -1,0 +1,60 @@
+# Compila Black para Windows (con el menu de trucos) y deja BLACK-XBERecomp.zip como artefacto.
+# Necesita windows/default.xbe.enc (el default.xbe de tu ISO cifrado) y el secreto XBE_KEY (la clave).
+name: Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-port]
+    paths: ["windows/**", ".github/workflows/windows.yml"]
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 360
+    env:
+      BLACK_COMMIT: d8dcd0f905b2fa26480ee91d05155209fa426005
+      SDK_COMMIT: 91146ff6e2a218b19c1109dc665d06020472ab57
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Codigo base y parche
+        shell: bash
+        run: |
+          mkdir -p work && cd work
+          git clone https://github.com/TGP482/XboxXBE-Recomp.git
+          git -C XboxXBE-Recomp checkout "$SDK_COMMIT"
+          git clone https://github.com/TGP482/BLACK-XBERecomp.git
+          git -C BLACK-XBERecomp checkout "$BLACK_COMMIT"
+          git -C BLACK-XBERecomp apply --whitespace=nowarn "$GITHUB_WORKSPACE/windows/cheats-windows.patch"
+
+      - name: Descifrar default.xbe
+        shell: bash
+        env:
+          XBE_KEY: ${{ secrets.XBE_KEY }}
+        run: |
+          if [ -z "$XBE_KEY" ]; then echo "::error::Falta el secreto XBE_KEY"; exit 1; fi
+          if [ ! -f windows/default.xbe.enc ]; then echo "::error::Falta windows/default.xbe.enc"; exit 1; fi
+          mkdir -p work/BLACK-XBERecomp/assets
+          key="$RUNNER_TEMP/xbe.key"
+          printf '%s' "$XBE_KEY" > "$key"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in windows/default.xbe.enc \
+            -out work/BLACK-XBERecomp/assets/default.xbe -pass "file:$key"
+          rm -f "$key"
+          sha1sum work/BLACK-XBERecomp/assets/default.xbe
+
+      - name: Compilar
+        shell: cmd
+        working-directory: work/BLACK-XBERecomp
+        run: call build.bat
+
+      - name: Empaquetar
+        shell: cmd
+        working-directory: work/BLACK-XBERecomp
+        run: call release.bat
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: Black-Windows
+          path: work/BLACK-XBERecomp/BLACK-XBERecomp.zip
+          if-no-files-found: error
