@@ -1,0 +1,1451 @@
+diff --git a/src/common/game_info.cpp b/src/common/game_info.cpp
+index 3cc2bad..d03baa6 100644
+--- a/src/common/game_info.cpp
++++ b/src/common/game_info.cpp
+@@ -275,7 +275,18 @@ const app::GameInfo app::kGame = {
+                 {"gyro_button", nullptr, &game::Opt().gyro.button},
+                 {"gyro_button_mode", nullptr, &game::Opt().gyro.button_mode},
+                 {"gyro_recenter_button", nullptr, &game::Opt().gyro.recenter_button},
+-                {"menu_animations", &game::Opt().menu_animations, nullptr}},
++                {"menu_animations", &game::Opt().menu_animations, nullptr},
++                {"infinite_ammo", &game::Opt().infinite_ammo, nullptr},
++                {"rapid_fire", nullptr, &game::Opt().rapid_fire},
++                {"no_recoil", &game::Opt().no_recoil, nullptr},
++                {"game_speed", nullptr, &game::Opt().game_speed},
++                {"god_mode", &game::Opt().god_mode, nullptr},
++                {"one_hit_kill", &game::Opt().one_hit_kill, nullptr},
++                {"infinite_grenades", &game::Opt().infinite_grenades, nullptr},
++                {"unlock_levels", &game::Opt().unlock_levels, nullptr},
++                {"unlock_black_ops", &game::Opt().unlock_black_ops, nullptr},
++                {"esp", &game::Opt().esp, nullptr},
++                {"aimbot", &game::Opt().aimbot, nullptr}},
+     .load = game::Load,
+     .save = game::Save,
+     .init = game::Init,
+diff --git a/src/common/menu.cpp b/src/common/menu.cpp
+index f18e05a..059ff60 100644
+--- a/src/common/menu.cpp
++++ b/src/common/menu.cpp
+@@ -30,6 +30,7 @@
+ #include "common/mouse_keyboard.h"
+ #include "common/options.h"
+ #include "common/translations.h"
++#include "game/weapons.h"
+ 
+ namespace app {
+ 
+@@ -239,7 +240,9 @@ enum RowId { kDisplayMode, kResolution, kRenderResolution, kMaxFps, kVsync, kFps
+              kGyroAiming, kGyroSensitivity, kAimAssist, kGyroAxis, kGyroButton, kGyroButtonMode, kGyroRecenter,
+              kGyroCalibrate, kColourBlind, kSensitivityVertical, kAimHorizontal, kAimVertical, kInvertMouseX,
+              kControllerVertical, kPadAimHorizontal, kPadAimVertical, kInvertPadX, kTextureReplacement,
+-             kTextureDumping, kDumpFormat, kDeadZone };
++             kTextureDumping, kDumpFormat, kDeadZone,
++             kInfiniteAmmo, kInfiniteGrenades, kRapidFire, kNoRecoil, kGodMode, kOneHitKill, kEsp, kAimbot,
++             kGameSpeed, kUnlockLevels, kUnlockBlackOps };
+ 
+ using rows::Kind;
+ using rows::Row;
+@@ -318,6 +321,24 @@ constexpr Row kControllerRows[] = {
+     {Kind::Value, kGyroCalibrate, "CALIBRATE GYRO"},
+ };
+ 
++// the CHEATS tab
++constexpr Row kCheatRows[] = {
++    {Kind::Heading, -1, "WEAPONS"},
++    {Kind::Value, kInfiniteAmmo, "INFINITE AMMO"},
++    {Kind::Value, kInfiniteGrenades, "INFINITE GRENADES"},
++    {Kind::Value, kRapidFire, "RAPID FIRE"},
++    {Kind::Value, kNoRecoil, "NO RECOIL"},
++    {Kind::Heading, -1, "PLAYER"},
++    {Kind::Value, kGodMode, "GOD MODE"},
++    {Kind::Value, kOneHitKill, "ONE-HIT KILL"},
++    {Kind::Value, kEsp, "ESP LINES"},
++    {Kind::Value, kAimbot, "AIMBOT (WHILE AIMING IN)"},  // esp.cpp turns the view only at a zoom above 1
++    {Kind::Heading, -1, "GAME"},
++    {Kind::Value, kGameSpeed, "GAME SPEED"},
++    {Kind::Value, kUnlockLevels, "UNLOCK ALL MISSIONS"},
++    {Kind::Value, kUnlockBlackOps, "UNLOCK BLACK OPS"},
++};
++
+ // the setting an ON / OFF row flips, nullptr for any other row
+ bool* ToggleFlag(Settings& s, int id) {
+     game::Options& o = game::Opt();
+@@ -339,6 +360,15 @@ bool* ToggleFlag(Settings& s, int id) {
+         case kControllerHoldAim: return &o.controller_hold_aim;
+         case kGyroAiming: return &o.gyro.enabled;
+         case kAimAssist: return &o.aim_assist;
++        case kInfiniteAmmo: return &o.infinite_ammo;
++        case kNoRecoil: return &o.no_recoil;
++        case kGodMode: return &o.god_mode;
++        case kOneHitKill: return &o.one_hit_kill;
++        case kInfiniteGrenades: return &o.infinite_grenades;
++        case kUnlockLevels: return &o.unlock_levels;
++        case kUnlockBlackOps: return &o.unlock_black_ops;
++        case kEsp: return &o.esp;
++        case kAimbot: return &o.aimbot;
+         default: return nullptr;
+     }
+ }
+@@ -505,6 +535,26 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
+     }
+ }
+ 
++// the cheat rows that are no ON / OFF, stepped first; false for another row
++bool StepCheatRow(int id, int step, char (&text)[64]) {
++    game::Options& o = game::Opt();
++    switch (id) {
++        case kRapidFire:
++            // off, then 2 to 4 times the rate
++            if (step) o.rapid_fire = uint32_t(StepRange(int(o.rapid_fire), 1, 4, 1, step));
++            if (o.rapid_fire <= 1) std::snprintf(text, sizeof(text), "OFF");
++            else std::snprintf(text, sizeof(text), "%uX", o.rapid_fire);
++            return true;
++        case kGameSpeed:
++            // 25% to 200% in steps of 25
++            if (step) o.game_speed = uint32_t(StepRange(int(o.game_speed), 25, 200, 25, step));
++            std::snprintf(text, sizeof(text), o.game_speed == 100 ? "%u%% (DEFAULT)" : "%u%%", o.game_speed);
++            return true;
++        default:
++            return false;
++    }
++}
++
+ // both sensitivity rows: 0.1 to 5.0 in steps of 0.1
+ void StepSensitivity(float& value, int step, char (&text)[64]) {
+     if (step) {
+@@ -611,7 +661,8 @@ std::string RowText(int id, int step, Settings& s = Get()) {
+     if (bool* on = ToggleFlag(s, id)) {
+         Flip(*on, step);
+         std::snprintf(text, sizeof(text), "%s", OnOff(*on));
+-    } else if (!StepDisplayRow(id, step, s, text) && !StepGraphicsRow(id, step, s, text)) {
++    } else if (!StepDisplayRow(id, step, s, text) && !StepGraphicsRow(id, step, s, text) &&
++               !StepCheatRow(id, step, text)) {
+         StepInputRow(id, step, text);
+     }
+     if (step && &s == &Get()) Changed(DisplayRow(id));
+@@ -626,10 +677,11 @@ std::string KeyText(std::string keys) {
+     return keys;
+ }
+ 
+-const char* const kPages[] = {"RECOMP SETTINGS", "MOUSE AND KEYBOARD", "CONTROLLER"};
++const char* const kPages[] = {"RECOMP SETTINGS", "MOUSE AND KEYBOARD", "CONTROLLER", "CHEATS"};
+ constexpr int kSettingsPage = 0;
+ constexpr int kKeyboardPage = 1;
+ constexpr int kControllerPage = 2;
++constexpr int kCheatsPage = 3;  // F10 panel only, the game's own options menu has no page for it
+ 
+ // the MOUSE AND KEYBOARD page's values, its binds aside
+ void CopyKeyboardValues(game::Options& to, const game::Options& from) {
+@@ -656,8 +708,27 @@ void CopyControllerValues(game::Options& to, const game::Options& from) {
+     to.gyro = from.gyro;
+ }
+ 
++void CopyCheatValues(game::Options& to, const game::Options& from) {
++    to.infinite_ammo = from.infinite_ammo;
++    to.rapid_fire = from.rapid_fire;
++    to.no_recoil = from.no_recoil;
++    to.game_speed = from.game_speed;
++    to.god_mode = from.god_mode;
++    to.one_hit_kill = from.one_hit_kill;
++    to.infinite_grenades = from.infinite_grenades;
++    to.unlock_levels = from.unlock_levels;
++    to.unlock_black_ops = from.unlock_black_ops;
++    to.esp = from.esp;
++    to.aimbot = from.aimbot;
++}
++
+ void RestoreDefaults(int page) {
+     game::Options& o = game::Opt();
++    if (page == kCheatsPage) {
++        CopyCheatValues(o, game::Options{});
++        Save();
++        return;
++    }
+     if (page == kControllerPage) {
+         CopyControllerValues(o, game::Options{});
+         Save();
+@@ -674,6 +745,7 @@ void RestoreDefaults(int page) {
+     o = game::Options{};
+     CopyKeyboardValues(o, keep);
+     CopyControllerValues(o, keep);
++    CopyCheatValues(o, keep);  // the CHEATS tab has its own defaults
+     o.keys = keep.keys;
+     Changed(true);
+ }
+@@ -804,6 +876,39 @@ void KeyRow(const Row& r) {
+     g_capture_armed = false;
+ }
+ 
++// the weapons the level's table has, one to take: it replaces the weapon not in hand (weapons.cpp)
++void DrawWeapons() {
++    weapons::View v = weapons::Current();
++    Section("GIVE A WEAPON");
++    if (!v.in_level) {
++        ImGui::PushStyleColor(ImGuiCol_Text, kDim);
++        ImGui::TextWrapped("%s", Ui("Start or continue a level to choose its weapons.", false).c_str());
++        ImGui::PopStyleColor();
++        return;
++    }
++    constexpr int kColumns = 3;
++    float gap = ImGui::GetStyle().ItemSpacing.x;
++    float w = (ImGui::GetContentRegionAvail().x - gap * (kColumns - 1)) / kColumns;
++    for (size_t i = 0; i < v.choices.size(); i++) {
++        const weapons::Choice& c = v.choices[i];
++        if (i % kColumns) ImGui::SameLine();
++        ImGui::PushID(c.type);
++        if (c.held) ImGui::PushStyleColor(ImGuiCol_Text, kHeading);  // in one of the two slots now
++        if (ImGui::Button(c.label.c_str(), ImVec2(w, 0))) weapons::Give(c.type);
++        if (c.held) ImGui::PopStyleColor();
++        ImGui::PopID();
++    }
++    Section("AMMUNITION");
++    if (ImGui::Button(Ui("FILL AMMUNITION").c_str(), ImVec2(w, 0))) weapons::FillAmmo();
++    if (!v.status.empty()) {
++        ImGui::SameLine();
++        ImGui::PushStyleColor(ImGuiCol_Text, kDim);
++        ImGui::AlignTextToFramePadding();
++        ImGui::TextUnformatted(v.status.c_str());
++        ImGui::PopStyleColor();
++    }
++}
++
+ void DrawRows(int page) {
+     size_t count = 0;
+     const Row* list = rows::Page(page, &count);
+@@ -813,6 +918,7 @@ void DrawRows(int page) {
+         else if (r.kind == Kind::Value) ValueRow(r);
+         else KeyRow(r);
+     }
++    if (page == kCheatsPage) DrawWeapons();
+ }
+ 
+ void Defaults() {
+@@ -867,6 +973,7 @@ void DrawFooter(float em) {
+     const char* hint = "";
+     if (g_capture >= 0) hint = "Press a key or mouse button to bind, Escape cancels";
+     else if (g_page == kKeyboardPage && g_hovered_box >= 0) hint = "Right click or Delete clears the key";
++    else if (g_page == kCheatsPage) hint = "A weapon replaces the one not in hand, gold names are held";
+     ImGui::TextUnformatted(Ui(hint, false).c_str());
+     ImGui::PopStyleColor();
+     float bw = em * 8;
+@@ -919,6 +1026,10 @@ const rows::Row* rows::Page(int page, size_t* count) {
+         *count = std::size(kControllerRows);
+         return kControllerRows;
+     }
++    if (page == kCheatsPage) {
++        *count = std::size(kCheatRows);
++        return kCheatRows;
++    }
+     static const std::vector<Row> rows = [] {
+         std::vector<Row> out(std::begin(kSettingsRows), std::end(kSettingsRows));
+         if (!game::HasLanguages()) std::erase_if(out, [](const Row& row) { return row.id == kLanguage; });
+diff --git a/src/common/options.h b/src/common/options.h
+index d2a9adb..af5d397 100644
+--- a/src/common/options.h
++++ b/src/common/options.h
+@@ -50,6 +50,18 @@ struct Options {
+     float controller_dead_zone = 0.0f;  // 0 the game's own kGameDeadZone
+     uint32_t rumble_intensity = 100;  // percent of the game's vibration
+     gyro::Settings gyro;  // the controller's gyro turns the view, beside the right stick
++    // cheats (the CHEATS tab of the F10 panel)
++    bool infinite_ammo = false;  // the player's magazine and reserve never go down
++    uint32_t rapid_fire = 1;  // times the player's rate of fire, 1 the game's
++    bool no_recoil = false;  // the player's shots do not kick the view
++    uint32_t game_speed = 100;  // percent of the game's speed, menus and films keep theirs
++    bool god_mode = false;  // no hit takes the player's health
++    bool one_hit_kill = false;  // any hit of the player's bullets kills
++    bool infinite_grenades = false;  // throwing a grenade keeps the count
++    bool unlock_levels = false;  // every mission open on every difficulty, the save is left as it is
++    bool unlock_black_ops = false;  // Black Ops open on the missions open on another difficulty, the same
++    bool esp = false;  // a line from the bottom of the screen and a box to each living enemy
++    bool aimbot = false;  // aiming in turns the view to the body of the enemy nearest the crosshair
+     bool menu_animations = true;  // off: menu pages and the pause menu change without sliding in and out
+     std::map<std::string, std::string> keys;  // action id to key names, absent is the default
+ };
+diff --git a/src/game/cheats.cpp b/src/game/cheats.cpp
+new file mode 100644
+index 0000000..57ff76f
+--- /dev/null
++++ b/src/game/cheats.cpp
+@@ -0,0 +1,99 @@
++// The cheats page's god mode, one-hit kill and infinite grenades. The rest live where the game
++// already has a hook: infinite ammo, rapid fire and no recoil with the weapon's, game speed with the frame time
++#include <algorithm>
++
++#include "common/options.h"
++#include "game/layout.h"
++#include "xdk/hle.h"
++
++using namespace kernel;
++using namespace layout;
++
++namespace {
++
++// character: the player is the one in the world container, its kind 2
++constexpr uint32_t kCharKind = 0xC4;
++constexpr uint32_t kCharGrenades = 0x286;  // uint16
++constexpr uint32_t kCharHealth = 0x2F0;    // float, the difficulty's full at most
++constexpr uint32_t kCharDying = 0x384;     // not 0 once it is killed
++// byte the scripts set: the player's damage calls (its class's 0x1ED990, 0x1ED700, 0x1ED2B0, 0x1ED5D0, and
++// 0x1ED1E0) take nothing while it is
++constexpr uint32_t kCharInvulnerable = 0x8F2;
++constexpr uint32_t kPlayerKind = 2;
++
++constexpr uint32_t kDifficulty = 0x2014C;  // in the game object, 0 easy to 3 black ops
++// full health, as 0x13F10 scales 1.0: easy and normal, then hard and black ops
++constexpr float kFullHealth[] = {1200.0f, 750.0f};
++
++uint32_t Player() { return R32(kWorld) ? R32(kWorld) + kWorldPlayer : 0; }
++
++float FullHealth() { return kFullHealth[R32(R32(kGame) + kDifficulty) >= 2]; }
++
++// One-hit kill: a hit of the player's on another character starts from a sliver of health, any damage kills.
++// A hit that took nothing gives the health back
++constexpr float kSliver = 0.001f;
++
++struct Doomed {
++    uint32_t who = 0;
++    float health = 0;
++};
++
++Doomed Doom(uint32_t victim, uint32_t attacker) {
++    uint32_t me = Player();
++    if (!game::Opt().one_hit_kill || !me || attacker != me || victim == me || R32(victim + kCharDying)) return {};
++    float& health = G<float>(victim + kCharHealth);
++    if (!(health > kSliver)) return {};
++    Doomed kept{victim, health};
++    health = kSliver;
++    return kept;
++}
++
++void Spare(const Doomed& kept) {
++    if (!kept.who || R32(kept.who + kCharDying)) return;
++    float& health = G<float>(kept.who + kCharHealth);
++    if (health > 0) health = kept.health - (kSliver - health);
++}
++
++bool g_invulnerable;  // the flag is ours, cleared when god mode goes off
++
++}  // namespace
++
++// The player's update, a frame (ecx the player, its class's own): god mode fills the health and holds the flag
++// its damage calls test
++X86_EXTERN_FUNC(__imp__sub_001E5FA0);
++X86_FUNC(sub_001E5FA0) {
++    uint32_t me = ctx.ecx;
++    if (me && me == Player() && R32(me + kCharKind) == kPlayerKind) {
++        if (game::Opt().god_mode && !R32(me + kCharDying)) {
++            float& health = G<float>(me + kCharHealth);
++            health = std::max(health, FullHealth());
++            G<uint8_t>(me + kCharInvulnerable) = 1;
++            g_invulnerable = true;
++        } else if (g_invulnerable) {
++            G<uint8_t>(me + kCharInvulnerable) = 0;
++            g_invulnerable = false;
++        }
++    }
++    __imp__sub_001E5FA0(ctx, base);
++}
++
++// A soldier takes a bullet (ecx the victim, the sixth of seven arguments its attacker, ret 0x1C): the
++// characters' class, the player's has its own
++X86_EXTERN_FUNC(__imp__sub_001E74B0);
++X86_FUNC(sub_001E74B0) {
++    Doomed doomed = Doom(ctx.ecx, R32(ctx.esp + 0x18));
++    __imp__sub_001E74B0(ctx, base);
++    Spare(doomed);
++}
++
++// A character's animation event (64-bit hash, then a pointer to the character): the throw takes a grenade
++// (0x1E8934), the cheat puts the player's back
++X86_EXTERN_FUNC(__imp__sub_001E8830);
++X86_FUNC(sub_001E8830) {
++    uint32_t who = R32(ctx.esp + 0xC);
++    uint32_t me = who ? R32(who) : 0;
++    bool keep = game::Opt().infinite_grenades && me && me == Player();
++    uint16_t grenades = keep ? G<uint16_t>(me + kCharGrenades) : 0;
++    __imp__sub_001E8830(ctx, base);
++    if (keep && G<uint16_t>(me + kCharGrenades) < grenades) G<uint16_t>(me + kCharGrenades) = grenades;
++}
+diff --git a/src/game/difficulty.cpp b/src/game/difficulty.cpp
+new file mode 100644
+index 0000000..6c68054
+--- /dev/null
++++ b/src/game/difficulty.cpp
+@@ -0,0 +1,113 @@
++// The cheats page's mission unlocks. The save keeps, per difficulty, which of the 8 missions are open; the game opens
++// a mission on Black Ops once it was beaten on hard, the next mission once one is beaten. UNLOCK ALL MISSIONS opens
++// every mission on the difficulties shown, UNLOCK BLACK OPS opens on Black Ops each mission open on another one and
++// has the difficulty select offer it. A mission stays open while its cheat is on: loading one reads the table in many
++// places, and a mission closed again under them hung the load. Turned off, the cheat closes what it opened; a save
++// written while it was on keeps them open.
++#include <vector>
++
++#include "common/options.h"
++#include "xdk/hle.h"
++
++using namespace kernel;
++
++namespace {
++
++// mission table: 8 missions of 0x20 bytes a difficulty, the difficulties 0x100 apart
++constexpr uint32_t kMissionOpen = 0x2D0D9E;  // byte: 1 open
++constexpr uint32_t kMissionSize = 0x20;
++constexpr uint32_t kDifficultySize = 0x100;
++constexpr uint32_t kMissions = 8;
++constexpr uint32_t kBlackOps = 3;  // easy 0 to black ops 3
++
++// as many difficulties as the difficulty select offers: 3 when no mission was picked on the level select, else as
++// many as the mission is open on
++constexpr uint32_t kDifficultySelection = 0x2EC560;
++
++uint32_t Open(uint32_t difficulty, uint32_t mission) {
++    return kMissionOpen + difficulty * kDifficultySize + mission * kMissionSize;
++}
++
++// the missions each cheat opened, closed again when it goes off
++std::vector<uint32_t> g_levels;
++std::vector<uint32_t> g_black_ops;
++
++void Set(uint32_t at, std::vector<uint32_t>& opened) {
++    if (G<uint8_t>(at)) return;
++    G<uint8_t>(at) = 1;
++    opened.push_back(at);
++}
++
++void Close(std::vector<uint32_t>& opened) {
++    // a byte the game set to something else since is the game's
++    for (uint32_t at : opened)
++        if (G<uint8_t>(at) == 1) G<uint8_t>(at) = 0;
++    opened.clear();
++}
++
++// the table as the cheats want it, before the game reads it
++void Unlock() {
++    const game::Options& o = game::Opt();
++    if (!o.unlock_black_ops) Close(g_black_ops);
++    if (!o.unlock_levels) Close(g_levels);
++    for (uint32_t m = 0; m < kMissions; m++) {
++        bool any = false;
++        for (uint32_t d = 0; d < kBlackOps; d++) {
++            if (o.unlock_levels) Set(Open(d, m), g_levels);
++            any |= G<uint8_t>(Open(d, m)) == 1;
++        }
++        if (o.unlock_black_ops && any) Set(Open(kBlackOps, m), g_black_ops);
++    }
++}
++
++// the count the cheat raised, given back when it goes off. The difficulty select's bindings set 3 once at boot and
++// the level select a count when a mission is picked, so the cheat is kept there every tick of the front end too: on
++// from the options, it shows without a restart
++bool g_raised = false;
++uint32_t g_count = 0;
++
++void OfferBlackOps() {
++    uint32_t count = R32(kDifficultySelection);
++    if (game::Opt().unlock_black_ops) {
++        if (count == kBlackOps + 1) return;
++        g_count = count;
++        g_raised = true;
++        W32(kDifficultySelection, kBlackOps + 1);
++    } else if (g_raised) {
++        g_raised = false;
++        if (count == kBlackOps + 1) W32(kDifficultySelection, g_count);
++    }
++}
++
++}  // namespace
++
++// the level select's flags and the difficulty select's ticks, by the difficulty in play; the front end's every tick
++X86_EXTERN_FUNC(__imp__sub_00115030);
++X86_FUNC(sub_00115030) {
++    Unlock();
++    __imp__sub_00115030(ctx, base);
++    OfferBlackOps();
++}
++
++// the level select's choice of mission: its ticks and the count of difficulties open on it
++X86_EXTERN_FUNC(__imp__sub_0011B890);
++X86_FUNC(sub_0011B890) {
++    Unlock();
++    __imp__sub_0011B890(ctx, base);
++    OfferBlackOps();
++}
++
++// the difficulty select's bindings, the count among them
++X86_EXTERN_FUNC(__imp__sub_00124F30);
++X86_FUNC(sub_00124F30) {
++    Unlock();
++    __imp__sub_00124F30(ctx, base);
++    OfferBlackOps();
++}
++
++// the mission starts on the difficulty chosen, nothing when it is not open there
++X86_EXTERN_FUNC(__imp__sub_00124CF0);
++X86_FUNC(sub_00124CF0) {
++    Unlock();
++    __imp__sub_00124CF0(ctx, base);
++}
+diff --git a/src/game/esp.cpp b/src/game/esp.cpp
+new file mode 100644
+index 0000000..d934352
+--- /dev/null
++++ b/src/game/esp.cpp
+@@ -0,0 +1,209 @@
++// The cheats page's ESP LINES: each living enemy gets a box round it and a line to it from the bottom of the screen,
++// drawn over the finished frame with the view the scene was drawn with. AIMBOT: while the player aims in the view
++// turns to the body of the living enemy nearest the crosshair
++#include <chrono>
++#include <cmath>
++#include <cstring>
++
++#include "common/options.h"
++#include "game/layout.h"
++#include "xdk/hle.h"
++#include "xdk/layout.h"
++
++using namespace kernel;
++using namespace layout;
++
++namespace {
++
++// character: kind 1 an enemy (the game's aim assist takes only those), its position the one its update makes a
++// velocity of. The world is Y up: that update zeroes Y for the speed along the ground
++constexpr uint32_t kCharKind = 0xC4;
++constexpr uint32_t kCharPosition = 0xA0;
++constexpr uint32_t kCharDying = 0x384;
++constexpr uint32_t kEnemyKind = 1;
++
++// the player's controller: yaw positive left, pitch positive down, in degrees (mouse.cpp)
++constexpr uint32_t kControllerYaw = 0x18;
++constexpr uint32_t kControllerPitch = 0x1C;
++// the player's zoom of the aim, above 1 while it aims in (hooks.cpp's ZoomStep)
++constexpr uint32_t kPlayerZoom = 0x2A4;
++
++constexpr float kHeight = 1.8f;      // world units are metres: the near plane is 0.08
++constexpr float kBoxWidth = 0.45f;   // of the box's height
++constexpr float kNear = 0.08f;       // clip w nearer than this is behind the camera
++constexpr float kThickness = 1.5f;   // lines of a 480 frame
++constexpr float kChest = 1.2f;       // above the feet, where the aimbot aims: the body, a bigger hit than the head
++constexpr float kCone = 30.0f;       // degrees from the crosshair an enemy is taken in
++constexpr float kPull = 1.0f;        // of the turn to the target, a frame
++constexpr float kDegrees = 180.0f / 3.14159265f;
++constexpr float kColour[4] = {1.0f, 0.125f, 0.125f, 1.0f};  // rgba
++
++// an enemy is drawn while its update ran this recently: none once the game pauses, no flicker between ticks
++constexpr auto kSeen = std::chrono::milliseconds(250);
++constexpr size_t kMaxEnemies = 64;
++
++struct Seen {
++    uint32_t who;
++    std::chrono::steady_clock::time_point at;
++};
++Seen g_seen[kMaxEnemies];
++size_t g_count;
++
++// the scene's view and projection, row vectors: clip = position * view * projection
++float g_view[16], g_projection[16];
++bool g_camera;
++uint32_t g_camera_frame;  // counts the scene's draws: the aimbot turns once for each view it reads
++
++// the 2D layer's untextured triangles (eax triangles, ecx their points; float x, y of the points' offset, then a
++// float rgba of each point, 16 aligned): in its batch, drawn with its shader and states at the next flush
++constexpr uint32_t kTriangles = 0xD5A00;
++struct Vertex {
++    float x, y;
++};
++constexpr size_t kSegments = 5;  // the line and the box's four sides
++constexpr size_t kMaxVertices = kMaxEnemies * kSegments * 6;
++
++void Remember(uint32_t who) {
++    auto now = std::chrono::steady_clock::now();
++    for (size_t i = 0; i < g_count; i++)
++        if (g_seen[i].who == who) {
++            g_seen[i].at = now;
++            return;
++        }
++    if (g_count < kMaxEnemies) {
++        g_seen[g_count++] = {who, now};
++        return;
++    }
++    // full with the ESP off, which keeps the list: the one seen longest ago goes
++    Seen* oldest = g_seen;
++    for (Seen& s : g_seen)
++        if (s.at < oldest->at) oldest = &s;
++    *oldest = {who, now};
++}
++
++// clip space; false behind the camera
++bool Clip(const float p[3], float clip[4]) {
++    float eye[4];
++    for (int c = 0; c < 4; c++)
++        eye[c] = p[0] * g_view[c] + p[1] * g_view[4 + c] + p[2] * g_view[8 + c] + g_view[12 + c];
++    for (int c = 0; c < 4; c++)
++        clip[c] = eye[0] * g_projection[c] + eye[1] * g_projection[4 + c] + eye[2] * g_projection[8 + c] +
++                  eye[3] * g_projection[12 + c];
++    return clip[3] > kNear;
++}
++
++// screen position in viewport pixels; false behind the camera
++bool Project(const float p[3], float vx, float vy, float vw, float vh, float out[2]) {
++    float clip[4];
++    if (!Clip(p, clip)) return false;
++    out[0] = vx + (clip[0] / clip[3] + 1) * 0.5f * vw;
++    out[1] = vy + (1 - clip[1] / clip[3]) * 0.5f * vh;
++    return true;
++}
++
++// a segment as a quad of two triangles, its width across it
++Vertex* Segment(Vertex* v, float x0, float y0, float x1, float y1, float width) {
++    float dx = x1 - x0, dy = y1 - y0;
++    float length = std::sqrt(dx * dx + dy * dy);
++    if (!(length > 0)) return v;
++    float nx = -dy / length * width * 0.5f, ny = dx / length * width * 0.5f;
++    const float corner[4][2] = {{x0 + nx, y0 + ny}, {x0 - nx, y0 - ny}, {x1 + nx, y1 + ny}, {x1 - nx, y1 - ny}};
++    for (int i : {0, 1, 2, 2, 1, 3}) *v++ = {corner[i][0], corner[i][1]};
++    return v;
++}
++
++}  // namespace
++
++namespace game {
++
++// the device's view and projection as the scene draws them (D3DDevice_SetTransform, view 0 and projection 1)
++void EspCamera() {
++    uint32_t transforms = SYM(D3D_Device) + XDK_CDevice_Transforms;
++    std::memcpy(g_view, HostPtr(transforms), sizeof(g_view));
++    std::memcpy(g_projection, HostPtr(transforms + 64), sizeof(g_projection));
++    g_camera = true;
++    g_camera_frame++;
++}
++
++// esi the player's controller in its look update, before the game clamps the pitch and wraps the yaw; while the
++// player aims in. The turn is read off the projection, the angles of the target from the middle of the view
++void Aimbot(X86Context& ctx) {
++    static uint32_t turned;
++    uint32_t c = ctx.esi;
++    uint32_t me = R32(kWorld) ? R32(kWorld) + kWorldPlayer : 0;
++    if (!Opt().aimbot || !g_camera || !me || turned == g_camera_frame || !(G<float>(me + kPlayerZoom) > 1.01f)) return;
++    turned = g_camera_frame;
++    auto now = std::chrono::steady_clock::now();
++    float best = kCone, yaw = 0, pitch = 0;
++    for (size_t i = 0; i < g_count; i++) {
++        uint32_t who = g_seen[i].who;
++        if (now - g_seen[i].at > kSeen || R32(who + kCharKind) != kEnemyKind || R32(who + kCharDying)) continue;
++        const float* at = &G<float>(who + kCharPosition);
++        float chest[3] = {at[0], at[1] + kChest, at[2]}, clip[4];
++        if (!Clip(chest, clip)) continue;
++        float y = -std::atan(clip[0] / clip[3] / g_projection[0]) * kDegrees;
++        float p = -std::atan(clip[1] / clip[3] / g_projection[5]) * kDegrees;
++        float off = std::sqrt(y * y + p * p);
++        if (off < best) best = off, yaw = y, pitch = p;
++    }
++    G<float>(c + kControllerYaw) += yaw * kPull;
++    G<float>(c + kControllerPitch) += pitch * kPull;
++}
++
++// D3DVIEWPORT8: x, y, width, height. Called between the 2D layer's begin and end
++void DrawEsp(X86Context& ctx, float unit) {
++    if (!Opt().esp || !g_camera || !R32(kWorld)) return;
++    uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
++    float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
++    float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
++    static const uint32_t buffer = mem::AllocSystem(kMaxVertices * sizeof(Vertex), 16);
++    static const uint32_t offset = mem::AllocSystem(8, 16);
++    static const uint32_t colours = [] {
++        uint32_t c = mem::AllocSystem(kMaxVertices * sizeof(kColour), 16);
++        for (size_t i = 0; i < kMaxVertices; i++) std::memcpy(HostPtr(c + i * sizeof(kColour)), kColour, sizeof(kColour));
++        return c;
++    }();
++    Vertex* first = static_cast<Vertex*>(HostPtr(buffer));
++    Vertex* v = first;
++    float width = kThickness * unit;
++    auto now = std::chrono::steady_clock::now();
++    size_t kept = 0;
++    for (size_t i = 0; i < g_count; i++) {
++        uint32_t who = g_seen[i].who;
++        if (now - g_seen[i].at > kSeen || R32(who + kCharKind) != kEnemyKind || R32(who + kCharDying)) continue;
++        g_seen[kept++] = g_seen[i];
++        const float* at = &G<float>(who + kCharPosition);
++        float feet[3] = {at[0], at[1], at[2]};
++        float head[3] = {at[0], at[1] + kHeight, at[2]};
++        float f[2], h[2];
++        if (!Project(feet, vx, vy, vw, vh, f) || !Project(head, vx, vy, vw, vh, h)) continue;
++        float half = (f[1] - h[1]) * kBoxWidth * 0.5f;
++        float left = f[0] - half, right = f[0] + half;
++        v = Segment(v, vx + vw * 0.5f, vy + vh, f[0], f[1], width);
++        v = Segment(v, left, h[1], right, h[1], width);
++        v = Segment(v, left, f[1], right, f[1], width);
++        v = Segment(v, left, h[1], left, f[1], width);
++        v = Segment(v, right, h[1], right, f[1], width);
++    }
++    g_count = kept;
++    if (v == first) return;
++    W32(offset, 0);
++    W32(offset + 4, 0);
++    uint32_t eax = ctx.eax, ecx = ctx.ecx;
++    ctx.eax = uint32_t(v - first) / 3;
++    ctx.ecx = buffer;
++    CallGuest(ctx, kTriangles, {offset, colours});
++    ctx.eax = eax;
++    ctx.ecx = ecx;
++}
++
++}  // namespace game
++
++// The characters' update, a frame (ecx the character, its class's own; the player's is 0x1E5FA0): the enemies
++// that ran it are the ones drawn
++X86_EXTERN_FUNC(__imp__sub_001DFD90);
++X86_FUNC(sub_001DFD90) {
++    uint32_t who = ctx.ecx;
++    if ((game::Opt().esp || game::Opt().aimbot) && who && R32(who + kCharKind) == kEnemyKind && !R32(who + kCharDying)) Remember(who);
++    __imp__sub_001DFD90(ctx, base);
++}
+diff --git a/src/game/fps_counter.cpp b/src/game/fps_counter.cpp
+index a8369a1..861d40a 100644
+--- a/src/game/fps_counter.cpp
++++ b/src/game/fps_counter.cpp
+@@ -19,6 +19,10 @@ using flash::kClipNext;
+ using flash::kClipX;
+ using flash::kClipY;
+ 
++namespace game {
++void DrawEsp(X86Context& ctx, float unit);  // esp.cpp
++}
++
+ namespace {
+ 
+ // the game's 2D layer: Text(font, wide text, x, y, size, rgba floats), viewport pixels from the top left
+@@ -135,13 +139,15 @@ void DrawOverlay(X86Context& ctx, uint8_t*) {
+     const TitlePage* title = CurrentTitlePage();
+     std::optional<float> slide = title ? LegendSlide(*title) : std::nullopt;
+     bool watermark = slide.has_value();
+-    if (!(fps || watermark) || !font || !(h > 0)) return;
++    bool esp = game::Opt().esp;
++    if (!(fps || watermark || esp) || !font || !(h > 0)) return;
+     View view{h / 480, w / h / game::Aspect()};
+     float& width = G<float>(font + kFontScale);
+     float game_width = width;
+     float output_width = game::Aspect() * 480;
+     float watermark_x = output_width - kWatermarkRight - TextWidth(font, kWatermark) + slide.value_or(0.0f);
+     CallGuest(ctx, kBegin, {});
++    if (esp) game::DrawEsp(ctx, view.unit);
+     width = game_width * view.narrow;
+     if (fps) {
+         char text[32];
+diff --git a/src/game/hooks.cpp b/src/game/hooks.cpp
+index 1e137b4..3b6f3aa 100644
+--- a/src/game/hooks.cpp
++++ b/src/game/hooks.cpp
+@@ -21,6 +21,10 @@ void ViewScale(float xy);
+ void NearDepth(float plane);
+ }
+ 
++namespace game {
++void EspCamera();  // esp.cpp
++}
++
+ namespace {
+ 
+ constexpr uint32_t kDevice = SYM(D3D_Device);
+@@ -102,7 +106,10 @@ void AfterCreateDevice(X86Context& ctx, uint8_t* base) {
+ 
+ constexpr uint32_t kFrameCount = 0x2F4368;
+ 
+-// seconds the last frame took, the frame time the game was made for at most
++// the game speed cheat: the game's steps take this share of the real time
++static float Speed() { return float(std::clamp(game::Opt().game_speed, 25u, 200u)) / 100.0f; }
++
++// seconds the last frame took, the frame time the game was made for at most, at the game speed
+ static float FrameTime() {
+     using clock = std::chrono::steady_clock;
+     static clock::time_point last;
+@@ -114,7 +121,7 @@ static float FrameTime() {
+         frame = f;
+         last = now;
+     }
+-    return dt;
++    return dt * Speed();
+ }
+ 
+ // The game's timers step one fixed frame time a frame: they step the real one, so any frame rate plays at speed
+@@ -137,7 +144,9 @@ X86_FUNC(sub_000BE3F0) {
+ X86_FUNC(sub_001F9130) { Return(ctx, ctx.eax, 1); }
+ 
+ // The Flash menus and HUD tick in milliseconds, 33 a call: the real ones, the part of one carried over
++void WeaponsTick(X86Context& ctx);  // weapons.cpp: the weapons page's requests
+ void MenuTick(X86Context& ctx, uint8_t*) {
++    WeaponsTick(ctx);
+     using clock = std::chrono::steady_clock;
+     static clock::time_point last;
+     static float carry;
+@@ -153,6 +162,8 @@ static float FrameShare() { return FrameTime() / G<float>(kGameFrameTime); }
+ 
+ // weapon
+ constexpr uint32_t kWeaponOwner = 0xF0;
++constexpr uint32_t kWeaponAmmo = 0xF4;
++constexpr uint32_t kWeaponAltAmmo = 0xF8;  // the grenades under the barrel
+ // player
+ constexpr uint32_t kPlayerForward = 0xF0;
+ constexpr uint32_t kPlayerEye = 0x100;
+@@ -219,6 +230,7 @@ constexpr float kNearPlane = 0.08f;  // every camera's, set once at renderer ini
+ // Wider than the game's 70 it shows parts nearer than the near plane, which are kept
+ X86_EXTERN_FUNC(__imp__sub_00176F60);
+ X86_FUNC(sub_00176F60) {
++    if (ctx.esi == R32(kDisplay) + kDisplayDrawLists + kAlphaDrawList * kDrawListSize) game::EspCamera();
+     bool list = ctx.esi == R32(kDisplay) + kDisplayDrawLists + kGunDrawList * kDrawListSize;
+     bool scale = list && g_gun != 1;
+     bool keep_near = list && game::Opt().viewmodel_fov > kGameFov;
+@@ -293,8 +305,12 @@ X86_FUNC(sub_001D2860) {
+     if (g_gun != 1 && (from == kFromTracerA || from == kFromTracerB)) OnGun(out + kMatrixPosition, true);
+ }
+ 
+-// recoil dies away by a factor a frame
+-void RecoilDecay(X86Context& ctx, uint8_t*) { ctx.xmm[0].f[0] = std::pow(ctx.xmm[0].f[0], FrameShare()); }
++// Recoil dies away by a factor a frame. ebx the player: the kick a shot leaves (0x1EFE58) is spent here before
++// it reaches the view, the cheat makes it nothing
++void RecoilDecay(X86Context& ctx, uint8_t*) {
++    bool none = game::Opt().no_recoil && ctx.ebx == Player();
++    ctx.xmm[0].f[0] = none ? 0.0f : std::pow(ctx.xmm[0].f[0], FrameShare());
++}
+ 
+ constexpr uint32_t kDataSwayShares = 0x104;
+ 
+@@ -335,6 +351,37 @@ static bool g_idle_early;
+ // weapon
+ constexpr uint32_t kWeaponState = 0xD8;
+ constexpr uint32_t kWeaponWait = 0xDC;
++// ammo: a shot takes one from each (0x1EFBBB)
++constexpr uint32_t kAmmoTotal = 0x14;
++constexpr uint32_t kAmmoClip = 0x18;
++
++// the cheat: what the player's weapon had before its update, put back where it went down. A reload moves rounds
++// from the reserve to the magazine, the reserve is put back too
++struct KeptAmmo {
++    uint32_t ammo = 0;
++    uint32_t total = 0;
++    uint16_t clip = 0;
++};
++
++static KeptAmmo KeepAmmo(uint32_t weapon) {
++    uint32_t ammo = R32(weapon + kWeaponAmmo);
++    if (!game::Opt().infinite_ammo || !ammo || R32(weapon + kWeaponOwner) != Player()) return {};
++    return {ammo, R32(ammo + kAmmoTotal), G<uint16_t>(ammo + kAmmoClip)};
++}
++
++// the rounds a weapon has left in all: a shot of either barrel takes one (0x1EFBC5, 0x1EFEED)
++static uint32_t Rounds(uint32_t weapon) {
++    uint32_t rounds = 0;
++    for (uint32_t at : {kWeaponAmmo, kWeaponAltAmmo})
++        if (uint32_t ammo = R32(weapon + at)) rounds += R32(ammo + kAmmoTotal);
++    return rounds;
++}
++
++static void RestoreAmmo(uint32_t weapon, const KeptAmmo& kept) {
++    if (!kept.ammo || R32(weapon + kWeaponAmmo) != kept.ammo) return;
++    if (R32(kept.ammo + kAmmoTotal) < kept.total) W32(kept.ammo + kAmmoTotal, kept.total);
++    if (G<uint16_t>(kept.ammo + kAmmoClip) < kept.clip) G<uint16_t>(kept.ammo + kAmmoClip) = kept.clip;
++}
+ 
+ // the wait between a weapon's shots. The frame of a first shot is part of it: the fire clip runs that frame too
+ // and holds its next shot where the wait ends
+@@ -344,8 +391,15 @@ X86_FUNC(sub_001EEFD0) {
+     float& wait = G<float>(weapon + kWeaponWait);
+     float rest = wait;
+     float dt = Dt();
++    KeptAmmo kept = KeepAmmo(weapon);
++    uint32_t rounds = Rounds(weapon);
+     __imp__sub_001EEFD0(ctx, base);
++    bool shot = Rounds(weapon) < rounds;
++    RestoreAmmo(weapon, kept);
+     uint32_t me = R32(weapon + kWeaponOwner);
++    // the rapid fire cheat: a shot's wait, its fire mode's +0x20, is that many times shorter
++    uint32_t faster = std::clamp(game::Opt().rapid_fire, 1u, 4u);
++    if (shot && me == Player() && wait > 0) wait /= float(faster);
+     if (me == Player()) {
+         if (R32(weapon + kWeaponState) != 1 || wait != rest) g_idle_early = false;
+         else if (g_idle_early) W32(me + kPlayerFireRequest, 0);  // the fire request is spent, as on the console
+diff --git a/src/game/layout.h b/src/game/layout.h
+index 2b1a307..60a0045 100644
+--- a/src/game/layout.h
++++ b/src/game/layout.h
+@@ -43,6 +43,7 @@ constexpr uint32_t kDisplayHeight = 0xD42C;
+ constexpr uint32_t kDisplayViewWidth = 0xD4C0;
+ constexpr uint32_t kDisplayAspect = 0xD4C4;
+ constexpr uint32_t kDisplayDrawLists = 0xCA6C;
++constexpr uint32_t kAlphaDrawList = 2;  // the alpha blended meshes, drawn with the scene's camera
+ constexpr uint32_t kGunDrawList = 5;  // the first person models
+ // draw list
+ constexpr uint32_t kDrawListSize = 0x18;
+diff --git a/src/game/mouse.cpp b/src/game/mouse.cpp
+index c3b6803..e5cba64 100644
+--- a/src/game/mouse.cpp
++++ b/src/game/mouse.cpp
+@@ -24,6 +24,10 @@ using flash::Member;
+ using flash::Members;
+ using flash::Type;
+ 
++namespace game {
++void Aimbot(X86Context& ctx);  // esp.cpp
++}
++
+ // degrees a count at sensitivity 1
+ constexpr float kDegrees = 0.05f;
+ constexpr float kHalfRadians = 3.14159265f / 360.0f;  // degrees to radians of half the angle
+@@ -78,6 +82,7 @@ void UpdateSway(X86Context& ctx, float yaw, float pitch) {
+ 
+ // esi the player's controller. The game adds the stick, clamps the pitch and wraps the yaw after this.
+ void MouseLook(X86Context& ctx, uint8_t*) {
++    game::Aimbot(ctx);
+     float yaw = 0.0f;
+     float pitch = 0.0f;
+     float dx;
+diff --git a/src/game/weapons.cpp b/src/game/weapons.cpp
+new file mode 100644
+index 0000000..409aa1f
+--- /dev/null
++++ b/src/game/weapons.cpp
+@@ -0,0 +1,513 @@
++// The weapons page of the F10 panel: any of the game's player weapons in any level.
++//
++// Every level's weapon table holds all seventeen player weapons, but a level ships only the first person banks
++// (Levels\Level_NN\fpguns\<weapon>.db and .wdd: the gun, arms, animations and sounds) and the world models
++// (Guns.bin, the "<weapon>_LOD" models a dropped gun shows) of the guns it uses. So a weapon is given the game's way:
++// created from the table, put in the slot not in hand, and switched to as the d-pad does; a bank the level lacks is
++// read from another level's folder, and a world model it lacks from another level's Guns.bin.
++#include "game/weapons.h"
++
++#include <algorithm>
++#include <atomic>
++#include <cctype>
++#include <cstdio>
++#include <cstring>
++#include <filesystem>
++#include <map>
++#include <mutex>
++#include <string>
++#include <vector>
++
++#include "core/log.h"
++#include "game/layout.h"
++#include "kernel/disc.h"
++#include "kernel/memory.h"
++#include "xdk/hle.h"
++
++using namespace kernel;
++using namespace layout;
++namespace fs = std::filesystem;
++
++namespace {
++
++// the weapon manager: +0 the weapon table, +4 the weapon objects (0x110 each), +8 their in use flags
++constexpr uint32_t kWeaponManager = 0x2D12D0;
++constexpr uint32_t kTableCount = 1;  // byte
++constexpr uint32_t kTableEntries = 4;
++constexpr uint32_t kEntrySize = 0x20;  // name key (8 bytes), weapon data, ...
++// resource manager: the TEXTURE and MODELS dictionaries looked up by name, 11 of each
++constexpr uint32_t kResources = 0x2D45D8;
++constexpr uint32_t kTextureDicts = 0xC64;
++constexpr uint32_t kModelDicts = 0xC90;
++constexpr int kDictSlots = 11;
++constexpr int kDictSlotsKept = 3;  // left free for the level's own later loads
++// guest functions
++constexpr uint32_t kCreateWeapon = 0x1CEE10;  // edi the manager; (owner, type, 0) -> the weapon
++constexpr uint32_t kFreeWeapon = 0x1C9B90;    // edi the manager, edx the weapon
++constexpr uint32_t kFindModel = 0x1F83E0;     // (resources, key low, key high) -> the model or 0
++constexpr uint32_t kFixGuns = 0xB5F20;        // eax a Guns.bin in memory: relocated and its dictionaries registered
++// world
++constexpr uint32_t kWorldState = 0x5AE0;  // the level loader's step
++constexpr uint32_t kStatePlaying = 0x1C;
++constexpr uint32_t kWorldSilver = 0x5CB0;  // byte: the level loaded Guns_s.bin
++// player
++constexpr uint32_t kPlayerKind = 0xC4;
++constexpr uint32_t kKindPlayer = 2;
++constexpr uint32_t kPlayerInventory = 0x278;
++// inventory: the ammunition of each type (words) first
++constexpr uint32_t kInvOwner = 0x1C;
++constexpr uint32_t kInvSlots = 0x20;     // the weapons, one a slot
++constexpr uint32_t kInvHeld = 0x24;      // the weapon in hand
++constexpr uint32_t kInvSwitchTo = 0x28;  // the weapon a switch brings out
++constexpr uint32_t kInvRequest = 0x38;   // 2 asks to switch to the other slot, as the d-pad does
++constexpr uint32_t kInvSlotCount = 0x42;  // byte
++constexpr uint32_t kInvSlotHeld = 0x43;   // byte
++constexpr int kAmmoTypes = 10;
++constexpr uint32_t kAmmoMax = 999;
++// weapon and its data
++constexpr uint32_t kWeaponType = 0;  // byte: index in the table
++constexpr uint32_t kWeaponData = 0xEC;
++constexpr uint32_t kWeaponMagazine = 0xF4;  // the main fire's magazine, +0xF8 the alternate fire's
++constexpr uint32_t kMagazineData = 8;
++constexpr uint32_t kDataClip = 0x60;
++constexpr uint32_t kDataAmmoType = 0x64;
++
++// the game's files under D:, the disc image when it runs from one, else the game's folder
++const std::string kDiscRoot = "D:\\";
++
++// names as the game keeps them: twelve characters of " -/0-9A-Z_" in base 40
++std::string Decode(uint64_t key) {
++    char s[13] = {};
++    for (int i = 11; i >= 0; i--) {
++        int c = int(key % 40);
++        key /= 40;
++        s[i] = c == 0 ? ' ' : c == 1 ? '-' : c == 2 ? '/' : c < 13 ? char('0' + c - 3) : c < 39 ? char('A' + c - 13) : '_';
++    }
++    std::string out = s;
++    out.erase(out.find_last_not_of(' ') + 1);
++    return out;
++}
++
++uint64_t Encode(const std::string& name) {
++    uint64_t key = 0;
++    for (size_t i = 0; i < 12; i++) {
++        char ch = i < name.size() ? char(std::toupper(uint8_t(name[i]))) : ' ';
++        int c = ch == '-' ? 1 : ch == '/' ? 2 : ch >= '0' && ch <= '9' ? 3 + ch - '0' : ch >= 'A' && ch <= 'Z' ? 13 + ch - 'A' : ch == '_' ? 39 : 0;
++        key = key * 40 + uint64_t(c);
++    }
++    return key;
++}
++
++// the names the game's own text gives them, told apart by clip and ammunition; the silver ones end in 5
++const std::map<std::string, std::string> kNames = {
++    {"PST", "Pistol"},         {"PS5", "Pistol"},         {"GK1", "Glock"},        {"GK5", "Glock"},
++    {"MGN", "Magnum"},         {"MG5", "Magnum"},         {"SMG", "Uzi"},          {"SM5", "Uzi"},
++    {"SM3", "MAC-10"},         {"MC5", "MAC-10"},         {"MP1", "MP5"},          {"MP5", "MP5"},
++    {"P90", "P90"},            {"P95", "P90"},            {"AK1", "AK-47"},        {"AK5", "AK-47"},
++    {"ASR", "G36C"},           {"AS5", "G36C"},           {"M16", "M16"},          {"M45", "M16"},
++    {"BNS", "M16A2 + M203"},   {"SHG", "SPAS 12"},        {"SH5", "SPAS 12"},      {"RM1", "Remington 870"},
++    {"RM5", "Remington 870"},  {"SNR", "Walther 2000"},   {"SN5", "Walther 2000"}, {"HVY", "M249"},
++    {"HV5", "M249"},           {"RPG", "RPG"},            {"GRL", "Grenade launcher"},
++};
++
++std::string Label(const std::string& key_name) {
++    std::string code = key_name.size() > 4 && key_name.compare(0, 4, "BG1_") == 0 ? key_name.substr(4) : key_name;
++    auto it = kNames.find(code);
++    return it == kNames.end() ? code : it->second + " (" + code + ")";
++}
++
++// what the game thread found and the panel shows
++std::mutex g_lock;
++weapons::View g_view;
++std::atomic<int> g_give{-1};
++std::atomic<bool> g_fill{false};
++
++void SetStatus(const std::string& text) {
++    std::lock_guard<std::mutex> lock(g_lock);
++    g_view.status = text;
++    LOGI("weapons: %s", text.c_str());
++}
++
++std::string Lower(std::string s) {
++    for (char& c : s) c = char(std::tolower(uint8_t(c)));
++    return s;
++}
++
++// a file of the game, by its path under D:
++bool GameFileExists(const std::string& path) {
++    if (const Disc* disc = MountedDisc()) {
++        const Disc::Entry* e = disc->Find(path);
++        return e && !e->dir;
++    }
++    std::string host = ResolvePath(kDiscRoot + path, 0);
++    std::error_code ec;
++    return !host.empty() && fs::is_regular_file(host, ec);
++}
++
++// a file of the game, read whole: from the disc image when it runs from one, else from the game's folder
++bool LoadGameFile(const std::string& path, std::vector<uint8_t>& out) { return ReadGameFile(kDiscRoot + path, out); }
++
++int LevelNumber(std::string name) {
++    name = Lower(name);
++    bool ok = name.size() == 8 && name.compare(0, 6, "level_") == 0 && std::isdigit(uint8_t(name[6])) &&
++              std::isdigit(uint8_t(name[7]));
++    return ok ? (name[6] - '0') * 10 + (name[7] - '0') : -1;
++}
++
++// the level folders the game has, by number
++const std::vector<int>& Levels() {
++    static const std::vector<int> levels = [] {
++        std::vector<int> out;
++        if (const Disc* disc = MountedDisc()) {
++            if (const Disc::Entry* dir = disc->Find("Levels"))
++                for (const Disc::Entry& e : dir->children)
++                    if (e.dir && LevelNumber(e.name) >= 0) out.push_back(LevelNumber(e.name));
++        } else {
++            std::error_code ec;
++            for (const auto& e : fs::directory_iterator(ResolvePath(kDiscRoot + "Levels", 0), ec))
++                if (e.is_directory(ec) && LevelNumber(e.path().filename().string()) >= 0)
++                    out.push_back(LevelNumber(e.path().filename().string()));
++        }
++        std::sort(out.begin(), out.end());
++        return out;
++    }();
++    return levels;
++}
++
++// ---- first person banks: Level_NN\fpguns\ a level lacks is read from another level's -----------------------------
++
++// in place, the same length: the level number of a bank path to one that has the file
++void RedirectBank(uint32_t path_va) {
++    std::string path = ReadCString(path_va, 260);
++    std::string low = Lower(path);
++    size_t at = low.find("level_");
++    if (at == std::string::npos || low.find("\\fpguns\\", at) != at + 8 || !std::isdigit(uint8_t(low[at + 6])) ||
++        !std::isdigit(uint8_t(low[at + 7])))
++        return;
++    static std::mutex lock;
++    static std::map<std::string, int> chosen;  // lowercase path -> the level to read it from, -1 as it is
++    std::lock_guard<std::mutex> guard(lock);
++    auto it = chosen.find(low);
++    if (it == chosen.end()) {
++        size_t root = path.find(":\\");
++        size_t skip = root == std::string::npos ? 0 : root + 2;  // a D:\ in front
++        std::string rel = path.substr(skip);
++        int level = -1;
++        if (!GameFileExists(rel)) {
++            for (int n : Levels()) {
++                char digits[3];
++                std::snprintf(digits, sizeof(digits), "%02d", n);
++                std::string other = rel;
++                other.replace(at - skip + 6, 2, digits);
++                if (GameFileExists(other)) {
++                    level = n;
++                    break;
++                }
++            }
++            if (level < 0) LOGW("weapons: no level has %s", path.c_str());
++            else LOGI("weapons: %s from Level_%02d", path.c_str(), level);
++        }
++        it = chosen.emplace(low, level).first;
++    }
++    if (it->second < 0) return;
++    char* s = static_cast<char*>(HostPtr(path_va));
++    s[at + 6] = char('0' + it->second / 10);
++    s[at + 7] = char('0' + it->second % 10);
++}
++
++// ---- world models: another level's Guns.bin for the "_LOD" models this one lacks ----------------------------------
++
++struct GunsFile {
++    std::string path;  // Levels\Level_NN\Stg_0001\Guns.bin
++    bool silver;       // Guns_s.bin
++    std::vector<uint64_t> models;
++    uint32_t buffer = 0;     // guest copy, made the first time it is needed
++    uint32_t dicts[2] = {};  // its TEXTURE and MODELS dictionaries while registered, this level
++};
++
++std::vector<GunsFile>& GunsFiles() {
++    static std::vector<GunsFile> files = [] {
++        std::vector<GunsFile> out;
++        for (int n : Levels()) {
++            for (const char* name : {"Guns.bin", "Guns_s.bin"}) {
++                char path[64];
++                std::snprintf(path, sizeof(path), "Levels\\Level_%02d\\Stg_0001\\%s", n, name);
++                std::vector<uint8_t> d;
++                if (!GameFileExists(path) || !LoadGameFile(path, d)) continue;
++                auto u32 = [&](size_t at) {
++                    uint32_t v = 0;
++                    if (at + 4 <= d.size()) std::memcpy(&v, &d[at], 4);
++                    return v;
++                };
++                // +4 the MODELS dictionary: +8 its count, +0xC its entries, 16 bytes each from the name key
++                uint32_t dict = u32(4);
++                uint32_t count = u32(dict + 8), entries = dict + u32(dict + 0xC);
++                GunsFile g{path, name[4] == '_', {}};
++                for (uint32_t i = 0; i < count && i < 64; i++) {
++                    uint64_t key = u32(entries + i * 16) | uint64_t(u32(entries + i * 16 + 4)) << 32;
++                    if (key) g.models.push_back(key);
++                }
++                out.push_back(std::move(g));
++            }
++        }
++        return out;
++    }();
++    return files;
++}
++
++int FreeSlots(uint32_t list) {
++    int free = 0;
++    for (int i = 0; i < kDictSlots; i++) free += R32(list + i * 4) == 0;
++    return free;
++}
++
++void Unregister(uint32_t list, uint32_t dict) {
++    for (int i = 0; i < kDictSlots; i++)
++        if (dict && R32(list + i * 4) == dict) W32(list + i * 4, 0);
++}
++
++// a level is loading: what this one registered goes, the game may have cleared it already
++void ForgetExtraGuns() {
++    uint32_t res = R32(kResources);
++    for (GunsFile& g : GunsFiles()) {
++        if (res) {
++            Unregister(res + kTextureDicts, g.dicts[0]);
++            Unregister(res + kModelDicts, g.dicts[1]);
++        }
++        g.dicts[0] = g.dicts[1] = 0;
++    }
++}
++
++// a world model, from another level's Guns.bin when this level lacks it; false when there is no room
++bool EnsureModel(X86Context& ctx, uint64_t key, bool silver) {
++    uint32_t res = R32(kResources);
++    if (!res) return false;
++    if (CallGuest(ctx, kFindModel, {res, uint32_t(key), uint32_t(key >> 32)})) return true;
++    GunsFile* pick = nullptr;
++    for (GunsFile& g : GunsFiles()) {
++        if (g.dicts[1] || std::find(g.models.begin(), g.models.end(), key) == g.models.end()) continue;
++        if (!pick || (g.silver == silver && pick->silver != silver)) pick = &g;
++    }
++    if (!pick) return false;
++    if (FreeSlots(res + kTextureDicts) <= kDictSlotsKept || FreeSlots(res + kModelDicts) <= kDictSlotsKept) return false;
++    std::vector<uint8_t> d;
++    if (!LoadGameFile(pick->path, d) || d.size() < 16) return false;
++    if (!pick->buffer) pick->buffer = mem::AllocContiguous(uint32_t(d.size()), 0, 0xFFFFFFFF, 0x1000);
++    if (!pick->buffer) return false;
++    std::memcpy(HostPtr(pick->buffer), d.data(), d.size());  // as on disc again: the game relocates it in place
++    // known before the fix up: its models look their textures up while it runs (sub_001FBCE0 below)
++    pick->dicts[0] = pick->buffer + R32(pick->buffer);
++    pick->dicts[1] = pick->buffer + R32(pick->buffer + 4);
++    uint32_t eax = ctx.eax;
++    ctx.eax = pick->buffer;
++    CallGuest(ctx, kFixGuns, {});
++    ctx.eax = eax;
++    LOGI("weapons: world models from %s", pick->path.c_str());
++    return CallGuest(ctx, kFindModel, {res, uint32_t(key), uint32_t(key >> 32)}) != 0;
++}
++
++bool EnsureWorldModel(X86Context& ctx, const std::string& weapon_name, bool silver) {
++    return EnsureModel(ctx, Encode(weapon_name + "_LOD"), silver);
++}
++
++// A dropped weapon becomes a pickup with its world model, a null one crashes: it is loaded now if it can be, else
++// the drop makes none, as when the game's pickups are all in use. pm the pickup manager: +0x5844 the pickup table
++// (count byte, +8 entries of 0x18: weapon key, model key, weapon type byte at +0x10), +0x5800 its models found
++constexpr uint32_t kPickupTable = 0x5844;
++constexpr uint32_t kPickupModels = 0x5800;
++constexpr uint32_t kPickupSize = 0x18;
++bool DropHasModel(X86Context& ctx, uint32_t pm, uint8_t type) {
++    uint32_t table = pm ? R32(pm + kPickupTable) : 0;
++    if (!table) return true;
++    uint32_t entries = R32(table + 8);
++    int count = G<uint8_t>(table);
++    int found = -1;
++    for (int i = 0; i < count && found < 0; i++)
++        if (G<uint8_t>(entries + uint32_t(i) * kPickupSize + 0x10) == type) found = i;
++    if (found < 0) return false;
++    uint32_t models = R32(pm + kPickupModels);
++    if (models && R32(models + uint32_t(found) * 4)) return true;
++    uint32_t e = entries + uint32_t(found) * kPickupSize;
++    uint64_t key = R32(e + 8) | uint64_t(R32(e + 12)) << 32;
++    uint32_t world = R32(kWorld);
++    return EnsureModel(ctx, key, world && G<uint8_t>(world + kWorldSilver) != 0);
++}
++
++// ---- the player and the level's weapon table ---------------------------------------------------------------------
++
++struct Level {
++    uint32_t world, player, inventory, manager, entries;
++    int count;
++};
++
++bool ReadLevel(Level& l) {
++    l.world = R32(kWorld);
++    if (!l.world || R32(l.world + kWorldState) != kStatePlaying) return false;
++    l.player = l.world + kWorldPlayer;
++    l.inventory = l.player + kPlayerInventory;
++    if (R32(l.player + kPlayerKind) != kKindPlayer || R32(l.inventory + kInvOwner) != l.player ||
++        !R32(l.inventory + kInvSlots))
++        return false;
++    l.manager = R32(kWeaponManager);
++    uint32_t table = l.manager ? R32(l.manager) : 0;
++    if (!table || !R32(l.manager + 4)) return false;
++    l.count = G<uint8_t>(table + kTableCount);
++    l.entries = R32(table + kTableEntries);
++    return l.entries && l.count > 0 && l.count <= 64;
++}
++
++uint64_t EntryKey(const Level& l, int type) {
++    uint32_t e = l.entries + uint32_t(type) * kEntrySize;
++    return R32(e) | uint64_t(R32(e + 4)) << 32;
++}
++
++uint32_t Slot(const Level& l, int i) { return R32(R32(l.inventory + kInvSlots) + uint32_t(i) * 4); }
++
++void Refresh() {
++    Level l;
++    weapons::View v;
++    v.in_level = ReadLevel(l);
++    if (v.in_level) {
++        int slots = std::min<int>(G<uint8_t>(l.inventory + kInvSlotCount), 2);
++        for (int t = 0; t < l.count; t++) {
++            std::string name = Decode(EntryKey(l, t));
++            if (name.empty()) continue;
++            bool held = false;
++            for (int i = 0; i < slots; i++)
++                if (uint32_t w = Slot(l, i)) held |= G<uint8_t>(w + kWeaponType) == t;
++            v.choices.push_back({Label(name), t, held});
++        }
++        std::sort(v.choices.begin(), v.choices.end(), [](const auto& a, const auto& b) { return a.label < b.label; });
++    }
++    std::lock_guard<std::mutex> lock(g_lock);
++    v.status = g_view.status;
++    g_view = std::move(v);
++}
++
++// the type's ammunition to at least five clips
++void FillType(const Level& l, uint32_t data, bool top_up) {
++    if (!data) return;
++    uint32_t type = R32(data + kDataAmmoType), clip = G<uint16_t>(data + kDataClip);
++    if (type >= kAmmoTypes) return;
++    uint16_t& ammo = G<uint16_t>(l.inventory + type * 2);
++    uint32_t want = std::min(kAmmoMax, top_up ? kAmmoMax : std::max(clip * 5, 1u));
++    if (ammo < want) ammo = uint16_t(want);
++}
++
++void FillWeapon(const Level& l, uint32_t weapon, bool top_up) {
++    for (uint32_t m = 0; m < 2; m++)
++        if (uint32_t mag = R32(weapon + kWeaponMagazine + m * 4)) FillType(l, R32(mag + kMagazineData), top_up);
++}
++
++void DoGive(X86Context& ctx, int type) {
++    Level l;
++    if (!ReadLevel(l)) return SetStatus("Only during a level");
++    if (type < 0 || type >= l.count) return;
++    std::string name = Decode(EntryKey(l, type));
++    if (G<uint8_t>(l.inventory + kInvSlotCount) < 2) return SetStatus("The player has a single weapon slot here");
++    if (R32(l.inventory + kInvRequest) || R32(l.inventory + kInvHeld) != R32(l.inventory + kInvSwitchTo))
++        return SetStatus("Wait for the weapon switch to end");
++    int held = G<int8_t>(l.inventory + kInvSlotHeld);
++    int other = held == 0 ? 1 : 0;
++    uint32_t slots = R32(l.inventory + kInvSlots);
++    uint32_t old = R32(slots + uint32_t(other) * 4);
++    if (old && old == R32(l.inventory + kInvHeld)) return SetStatus("Wait for the weapon switch to end");
++    // the gun made first: a full pool keeps the old one
++    uint32_t edi = ctx.edi;
++    ctx.edi = l.manager;
++    uint32_t weapon = CallGuest(ctx, kCreateWeapon, {l.player, uint32_t(type), 0});
++    ctx.edi = edi;
++    if (!weapon) return SetStatus("The game has no room for another weapon");
++    if (old) {
++        uint32_t edx = ctx.edx;
++        ctx.edi = l.manager;
++        ctx.edx = old;
++        CallGuest(ctx, kFreeWeapon, {});
++        ctx.edi = edi;
++        ctx.edx = edx;
++    }
++    W32(slots + uint32_t(other) * 4, weapon);
++    FillWeapon(l, weapon, false);
++    W32(l.inventory + kInvRequest, 2);  // out it comes, as the d-pad brings it
++    bool model = EnsureWorldModel(ctx, name, G<uint8_t>(l.world + kWorldSilver) != 0);
++    SetStatus(Label(name) + (model ? " given" : " given (dropped, it will vanish)"));
++    Refresh();
++}
++
++void DoFill() {
++    Level l;
++    if (!ReadLevel(l)) return SetStatus("Only during a level");
++    for (int i = 0; i < 2; i++)
++        if (uint32_t w = Slot(l, i)) FillWeapon(l, w, true);
++    SetStatus("Ammunition full");
++}
++
++}  // namespace
++
++namespace weapons {
++
++View Current() {
++    std::lock_guard<std::mutex> lock(g_lock);
++    return g_view;
++}
++
++void Give(int type) { g_give = type; }
++
++void FillAmmo() { g_fill = true; }
++
++}  // namespace weapons
++
++// game thread, each menu and HUD tick (hooks.cpp MenuTick)
++void WeaponsTick(X86Context& ctx) {
++    static int tick;
++    if (int type = g_give.exchange(-1); type >= 0) DoGive(ctx, type);
++    if (g_fill.exchange(false)) DoFill();
++    if (++tick % 10 == 0) Refresh();
++}
++
++// the game's file opening: a first person bank the level lacks comes from another level's folder
++X86_EXTERN_FUNC(__imp__sub_000C2C50);
++X86_FUNC(sub_000C2C50) {
++    RedirectBank(R32(ctx.esp + 4));
++    __imp__sub_000C2C50(ctx, base);
++}
++
++// A texture by name, (resources, name) stdcall: the game takes only dictionaries in its own memory heaps, so the
++// ones added from other levels' Guns.bin are searched after it (their world models showed white without)
++constexpr uint32_t kFindInTextures = 0x14B00;  // esi a TEXTURE dictionary; (name) -> the texture or 0
++X86_EXTERN_FUNC(__imp__sub_001FBCE0);
++X86_FUNC(sub_001FBCE0) {
++    uint32_t name = R32(ctx.esp + 8);
++    __imp__sub_001FBCE0(ctx, base);
++    if (ctx.eax || !name) return;
++    for (const GunsFile& g : GunsFiles()) {
++        if (!g.dicts[0]) continue;
++        uint32_t esi = ctx.esi;
++        ctx.esi = g.dicts[0];
++        uint32_t texture = CallGuest(ctx, kFindInTextures, {name});
++        ctx.esi = esi;
++        if (texture) {
++            ctx.eax = texture;
++            return;
++        }
++    }
++}
++
++// a weapon dropped as a pickup: eax the pickup manager, (type, ...) stdcall, five arguments
++X86_EXTERN_FUNC(__imp__sub_001E0EB0);
++X86_FUNC(sub_001E0EB0) {
++    uint8_t type = G<uint8_t>(ctx.esp + 4);
++    if (!DropHasModel(ctx, ctx.eax, type)) {
++        LOGI("weapons: no world model for weapon %u, the drop makes no pickup", type);
++        Return(ctx, 0, 5);
++        return;
++    }
++    __imp__sub_001E0EB0(ctx, base);
++}
++
++// a level's Guns.bin is in: the world models added for the last level go first
++X86_EXTERN_FUNC(__imp__sub_001D3790);
++X86_FUNC(sub_001D3790) {
++    ForgetExtraGuns();
++    __imp__sub_001D3790(ctx, base);
++}
+diff --git a/src/game/weapons.h b/src/game/weapons.h
+new file mode 100644
+index 0000000..b6716ef
+--- /dev/null
++++ b/src/game/weapons.h
+@@ -0,0 +1,24 @@
++#pragma once
++// The weapons page of the F10 panel: any of the game's player weapons in any level (weapons.cpp)
++#include <string>
++#include <vector>
++
++namespace weapons {
++
++struct Choice {
++    std::string label;  // display name and the game's code, "AK-47 (AK1)"
++    int type;           // index in the level's weapon table
++    bool held;          // in one of the player's two slots now
++};
++
++struct View {
++    bool in_level = false;  // a level is being played: the choices can be given
++    std::vector<Choice> choices;
++    std::string status;  // the last thing done, or why it could not be
++};
++
++View Current();      // any thread
++void Give(int type);  // any thread: done on the game thread's next tick
++void FillAmmo();      // any thread: both slots' ammunition to full
++
++}  // namespace weapons
