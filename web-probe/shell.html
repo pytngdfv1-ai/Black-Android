@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101116">
+  <title>BLACK — Prueba Web</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #101116;
+      color: #f4f4f5;
+      font-family: system-ui, sans-serif;
+    }
+    main {
+      width: min(100%, 620px);
+      padding: 30px;
+      border: 1px solid #343641;
+      border-radius: 18px;
+      background: #191b23;
+      text-align: center;
+    }
+    h1 { margin-top: 0; letter-spacing: .16em; }
+    p { color: #b8bbc7; line-height: 1.6; }
+    #estado-wasm {
+      margin: 24px 0;
+      padding: 16px;
+      border-radius: 10px;
+      background: #292b35;
+    }
+    #estado-wasm.correcto {
+      color: #8df0b0;
+      background: #173325;
+    }
+    #prueba {
+      width: 100%;
+      padding: 14px;
+      border: 0;
+      border-radius: 9px;
+      background: #d8dbe5;
+      color: #111217;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    #resultado { min-height: 24px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>BLACK</h1>
+    <p>Preparación de la versión para navegador</p>
+    <div id="estado-wasm">Esperando a que se ejecute WebAssembly…</div>
+    <p>
+      Esta prueba comprueba la ejecución web en PC y Android.
+      Todavía no contiene el motor del juego.
+    </p>
+    <button id="prueba" type="button">Probar controles táctiles y ratón</button>
+    <p id="resultado">Esperando interacción…</p>
+  </main>
+  <script>
+    document.getElementById("prueba").addEventListener("click", function () {
+      document.getElementById("resultado").textContent =
+        "Interacción del navegador: correcta.";
+    });
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>
