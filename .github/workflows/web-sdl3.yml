@@ -1,0 +1,46 @@
+
+name: BLACK Web - Etapa 2 SDL3
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - web-port
+    paths:
+      - "web-sdl3/**"
+      - ".github/workflows/web-sdl3.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-sdl3-web:
+    name: Probar SDL3 en navegador
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+
+      - name: Descargar SDL3
+        run: |
+          git clone --depth 1 --branch release-3.2.10 https://github.com/libsdl-org/SDL.git third_party/SDL
+
+      - name: Compilar prueba web
+        run: |
+          emcmake cmake -S web-sdl3 -B build-web \
+            -DSDL3_SOURCE_DIR="${GITHUB_WORKSPACE}/third_party/SDL" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-web --parallel 2
+
+      - name: Publicar resultado
+        uses: actions/upload-artifact@v4
+        with:
+          name: black-web-sdl3
+          path: build-web/dist/
+          if-no-files-found: error
+          retention-days: 7
