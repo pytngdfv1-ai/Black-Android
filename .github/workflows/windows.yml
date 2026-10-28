@@ -34,10 +34,11 @@ jobs:
           XBE_KEY: ${{ secrets.XBE_KEY }}
         run: |
           if [ -z "$XBE_KEY" ]; then echo "::error::Falta el secreto XBE_KEY"; exit 1; fi
+          echo "XBE_KEY: ${#XBE_KEY} caracteres (deben ser 32)"
           if [ ! -f windows/default.xbe.enc ]; then echo "::error::Falta windows/default.xbe.enc"; exit 1; fi
           mkdir -p work/BLACK-XBERecomp/assets
           key="$RUNNER_TEMP/xbe.key"
-          printf '%s' "$XBE_KEY" > "$key"
+          printf '%s' "$XBE_KEY" | tr -d '[:space:]' > "$key"  # sin espacios ni saltos de linea pegados
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in windows/default.xbe.enc \
             -out work/BLACK-XBERecomp/assets/default.xbe -pass "file:$key"
           rm -f "$key"
