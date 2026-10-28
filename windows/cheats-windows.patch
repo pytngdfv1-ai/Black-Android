@@ -1,8 +1,59 @@
 diff --git a/src/common/game_info.cpp b/src/common/game_info.cpp
-index 3cc2bad..d03baa6 100644
+index 3cc2bad..d10ae89 100644
 --- a/src/common/game_info.cpp
 +++ b/src/common/game_info.cpp
-@@ -275,7 +275,18 @@ const app::GameInfo app::kGame = {
+@@ -35,6 +35,23 @@ HCURSOR WindowCursor() {
+     return nullptr;
+ }
+ 
++// Windowed: the window's client size is the output (the settings' resolution), so dragging its edges or maximizing
++// it resizes the game: the aspect, the render targets and the HUD follow. While an edge is dragged only the swap
++// chain follows, the output is taken when the drag ends
++bool g_sizing = false;
++
++void FollowWindow(HWND hwnd) {
++    app::Settings& s = app::Get();
++    if (s.display_mode != app::DisplayMode::Windowed || IsIconic(hwnd)) return;
++    RECT rc;
++    GetClientRect(hwnd, &rc);
++    uint32_t w = uint32_t(rc.right - rc.left), h = uint32_t(rc.bottom - rc.top);
++    if (w < 320 || h < 240 || (s.width == w && s.height == h)) return;
++    s.width = w;
++    s.height = h;
++    app::Save();
++}
++
+ // the panel's keys and the mouse; F3 and the display mode stay with the host
+ bool Message(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* result) {
+     using namespace app;
+@@ -46,6 +63,26 @@ bool Message(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* resu
+         case kHostApplyDisplay:
+             UpdateWindowMonitor(hwnd);
+             break;
++        case WM_ENTERSIZEMOVE:
++            g_sizing = true;
++            break;
++        case WM_EXITSIZEMOVE:
++            g_sizing = false;
++            FollowWindow(static_cast<HWND>(hwnd));
++            break;
++        case WM_SIZE:
++            if (!g_sizing && wp != SIZE_MINIMIZED) FollowWindow(static_cast<HWND>(hwnd));
++            break;
++        case WM_GETMINMAXINFO: {
++            // no smaller than 640x360 of picture
++            HWND h = static_cast<HWND>(hwnd);
++            RECT r{0, 0, 640, 360};
++            AdjustWindowRect(&r, DWORD(GetWindowLongPtrW(h, GWL_STYLE)), FALSE);
++            MINMAXINFO* info = reinterpret_cast<MINMAXINFO*>(lp);
++            info->ptMinTrackSize.x = r.right - r.left;
++            info->ptMinTrackSize.y = r.bottom - r.top;
++            break;
++        }
+         case WM_KEYDOWN:
+         case WM_SYSKEYDOWN:
+             if (!(lp & kKeyWasDown) && input::PanelKey(int(wp))) {
+@@ -275,7 +312,18 @@ const app::GameInfo app::kGame = {
                  {"gyro_button", nullptr, &game::Opt().gyro.button},
                  {"gyro_button_mode", nullptr, &game::Opt().gyro.button_mode},
                  {"gyro_recenter_button", nullptr, &game::Opt().gyro.recenter_button},
@@ -23,7 +74,7 @@ index 3cc2bad..d03baa6 100644
      .save = game::Save,
      .init = game::Init,
 diff --git a/src/common/menu.cpp b/src/common/menu.cpp
-index f18e05a..059ff60 100644
+index f18e05a..16f8f60 100644
 --- a/src/common/menu.cpp
 +++ b/src/common/menu.cpp
 @@ -30,6 +30,7 @@
@@ -228,7 +279,18 @@ index f18e05a..059ff60 100644
      ImGui::TextUnformatted(Ui(hint, false).c_str());
      ImGui::PopStyleColor();
      float bw = em * 8;
-@@ -919,6 +1026,10 @@ const rows::Row* rows::Page(int page, size_t* count) {
+@@ -885,7 +992,9 @@ void DrawPanel() {
+     const ImGuiViewport* vp = ImGui::GetMainViewport();
+     float em = ImGui::GetFontSize();
+     ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+-    ImGui::SetNextWindowSize(ImVec2(em * 50, em * 32), ImGuiCond_Always);
++    // most of the window: the rows and the weapons list have room, never less than the old fixed size
++    ImVec2 size(std::max(vp->Size.x * 0.92f, em * 50), std::max(vp->Size.y * 0.92f, em * 32));
++    ImGui::SetNextWindowSize(ImVec2(std::min(size.x, vp->Size.x), std::min(size.y, vp->Size.y)), ImGuiCond_Always);
+     for (const auto& [col, color] : kPanelColors) ImGui::PushStyleColor(col, color);
+     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
+     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+@@ -919,6 +1028,10 @@ const rows::Row* rows::Page(int page, size_t* count) {
          *count = std::size(kControllerRows);
          return kControllerRows;
      }

@@ -8,6 +8,9 @@ Base: port de Windows de TGP482 (`BLACK-XBERecomp`) con el menu de trucos de la 
 4. Abre el juego y pulsa **F10**: pestana **CHEATS** (municion, granadas, rapid fire, sin retroceso, god mode,
    one-hit kill, ESP, aimbot, velocidad, desbloquear misiones y Black Ops, y dar cualquier arma).
 
+Ventana redimensionable: en F10 elige DISPLAY MODE = WINDOWED y pulsa Apply; despues arrastra los bordes o maximiza
+y el juego (relacion de aspecto, resolucion y HUD) sigue el tamano de la ventana.
+
 Sin probar en una PC: el parche compila a nivel de sintaxis, pero no se ha ejecutado el build completo.
 
 ## Compilar en GitHub Actions (sin instalar nada)
