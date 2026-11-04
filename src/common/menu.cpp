@@ -62,6 +62,10 @@ namespace host {
 void CheckForUpdates();
 }  // namespace host
 
+namespace game {
+void DumpObjects();  // objects.cpp
+}
+
 namespace app {
 
 Settings DefaultSettings();  // native/main.cpp: a phone's first run, unlimited frame rate and vsync off
@@ -248,7 +252,7 @@ enum RowId { kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlu
              kCheckUpdates, kTouchSensitivity, kLeftDeadzone, kRightDeadzone, kLeftSensitivity, kRightSensitivity,
              kScreenFilter, kGyroInvertX, kGyroInvertY, kUnlockLevels, kUnlockBlackOps, kTouchSkin, kCredit, kBloom,
              kFog, kAntiAliasing, kHdr, kEsp, kAimbot, kTouchStick, kDynamicRes, kDynamicTarget, kDynamicMin,
-             kDynamicMax, kDynamicHold };
+             kDynamicMax, kDynamicHold, kLogObjects };
 
 using rows::Kind;
 using rows::Row;
@@ -329,6 +333,8 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kGameSpeed, "GAME SPEED"},
     {Kind::Value, kUnlockLevels, "UNLOCK ALL MISSIONS"},
     {Kind::Value, kUnlockBlackOps, "UNLOCK BLACK OPS"},
+    {Kind::Heading, -1, "DEVELOPER"},
+    {Kind::Value, kLogObjects, "LOG OBJECTS TO THE LOG FILE"},
 };
 
 // the title menu's CREDITS page: who and what, and the links, which open in the browser. Its rows take no step; a
@@ -508,6 +514,10 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
 bool StepCheatRow(int id, int step, char (&text)[64]) {
     game::Options& o = game::Opt();
     switch (id) {
+        case kLogObjects:
+            if (step) game::DumpObjects();  // objects.cpp: the level's objects, by class, into the log
+            std::snprintf(text, sizeof(text), "PRESS");
+            return true;
         case kRapidFire:
             // off, then 2 to 4 times the rate
             if (step) o.rapid_fire = uint32_t(StepRange(int(o.rapid_fire), 1, 4, 1, step));
