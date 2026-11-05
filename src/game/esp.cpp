@@ -313,7 +313,7 @@ X86_FUNC(sub_001DFD90) {
     static std::chrono::steady_clock::time_point since;
     static int stage = 0;
     if (!R32(kWorld)) stage = 0;
-    else if (stage == 0) stage = 1, since = std::chrono::steady_clock::now(), LOGI("objects: level up, dump in 10 s");
+    else if (stage == 0) stage = 1, since = std::chrono::steady_clock::now(), LOGR("objects: level up, dump in 10 s");
     else if (stage == 1 && std::chrono::steady_clock::now() - since > std::chrono::seconds(10)) stage = 2, game::DumpObjects();
     if ((game::Opt().esp || game::Opt().aimbot) && who && R32(who + kCharKind) == kEnemyKind && !R32(who + kCharDying)) Remember(who);
     __imp__sub_001DFD90(ctx, base);

@@ -575,7 +575,7 @@ index 0000000..6c68054
 +}
 diff --git a/src/game/esp.cpp b/src/game/esp.cpp
 new file mode 100644
-index 0000000..2c42367
+index 0000000..9f89cc6
 --- /dev/null
 +++ b/src/game/esp.cpp
 @@ -0,0 +1,320 @@
@@ -894,7 +894,7 @@ index 0000000..2c42367
 +    static std::chrono::steady_clock::time_point since;
 +    static int stage = 0;
 +    if (!R32(kWorld)) stage = 0;
-+    else if (stage == 0) stage = 1, since = std::chrono::steady_clock::now(), LOGI("objects: level up, dump in 10 s");
++    else if (stage == 0) stage = 1, since = std::chrono::steady_clock::now(), LOGR("objects: level up, dump in 10 s");
 +    else if (stage == 1 && std::chrono::steady_clock::now() - since > std::chrono::seconds(10)) stage = 2, game::DumpObjects();
 +    if ((game::Opt().esp || game::Opt().aimbot) && who && R32(who + kCharKind) == kEnemyKind && !R32(who + kCharDying)) Remember(who);
 +    __imp__sub_001DFD90(ctx, base);
@@ -1100,7 +1100,7 @@ index c3b6803..e5cba64 100644
      float dx;
 diff --git a/src/game/objects.cpp b/src/game/objects.cpp
 new file mode 100644
-index 0000000..68b4897
+index 0000000..24617bf
 --- /dev/null
 +++ b/src/game/objects.cpp
 @@ -0,0 +1,85 @@
@@ -1166,26 +1166,26 @@ index 0000000..68b4897
 +    std::vector<std::pair<uint32_t, uint32_t>> order;  // count, table
 +    for (auto& [v, list] : classes) order.push_back({uint32_t(list.size()), v});
 +    std::sort(order.begin(), order.end());
-+    LOGI("objects: %zu classes", order.size());
++    LOGR("objects: %zu classes", order.size());
 +    for (auto& [count, v] : order) {
 +        if (count > 600) continue;
-+        LOGI("objects: class %08X count %u", v, count);
++        LOGR("objects: class %08X count %u", v, count);
 +        const std::vector<uint32_t>& list = classes[v];
 +        for (uint32_t i = 0; i < std::min<uint32_t>(kShown, count); i++) {
 +            uint32_t at = list[i];
 +            float f[3];
 +            for (int k = 0; k < 3; k++) f[k] = G<float>(at + 0xA0 + k * 4);
-+            LOGI("objects:   %08X  +A0 %.2f %.2f %.2f  +C4 %u", at, f[0], f[1], f[2], R32(at + 0xC4));
++            LOGR("objects:   %08X  +A0 %.2f %.2f %.2f  +C4 %u", at, f[0], f[1], f[2], R32(at + 0xC4));
 +            for (uint32_t off = 0; off < kBytes; off += 0x20) {
 +                if (!Readable(at + off, 0x20)) break;
 +                char line[160];
 +                int n = 0;
 +                for (uint32_t w = 0; w < 8; w++) n += std::snprintf(line + n, sizeof(line) - n, " %08X", R32(at + off + w * 4));
-+                LOGI("objects:     +%02X%s", off, line);
++                LOGR("objects:     +%02X%s", off, line);
 +            }
 +        }
 +    }
-+    LOGI("objects: done");
++    LOGR("objects: done");
 +}
 +
 +}  // namespace game

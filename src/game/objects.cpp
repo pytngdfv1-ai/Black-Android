@@ -60,26 +60,26 @@ void DumpObjects() {
     std::vector<std::pair<uint32_t, uint32_t>> order;  // count, table
     for (auto& [v, list] : classes) order.push_back({uint32_t(list.size()), v});
     std::sort(order.begin(), order.end());
-    LOGI("objects: %zu classes", order.size());
+    LOGR("objects: %zu classes", order.size());
     for (auto& [count, v] : order) {
         if (count > 600) continue;
-        LOGI("objects: class %08X count %u", v, count);
+        LOGR("objects: class %08X count %u", v, count);
         const std::vector<uint32_t>& list = classes[v];
         for (uint32_t i = 0; i < std::min<uint32_t>(kShown, count); i++) {
             uint32_t at = list[i];
             float f[3];
             for (int k = 0; k < 3; k++) f[k] = G<float>(at + 0xA0 + k * 4);
-            LOGI("objects:   %08X  +A0 %.2f %.2f %.2f  +C4 %u", at, f[0], f[1], f[2], R32(at + 0xC4));
+            LOGR("objects:   %08X  +A0 %.2f %.2f %.2f  +C4 %u", at, f[0], f[1], f[2], R32(at + 0xC4));
             for (uint32_t off = 0; off < kBytes; off += 0x20) {
                 if (!Readable(at + off, 0x20)) break;
                 char line[160];
                 int n = 0;
                 for (uint32_t w = 0; w < 8; w++) n += std::snprintf(line + n, sizeof(line) - n, " %08X", R32(at + off + w * 4));
-                LOGI("objects:     +%02X%s", off, line);
+                LOGR("objects:     +%02X%s", off, line);
             }
         }
     }
-    LOGI("objects: done");
+    LOGR("objects: done");
 }
 
 }  // namespace game
