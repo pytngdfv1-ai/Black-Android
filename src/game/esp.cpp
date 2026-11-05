@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 #include "common/options.h"
 #include "game/layout.h"
@@ -402,11 +403,64 @@ static void DrawBlood(X86Context& ctx, float unit) {
     ctx.ecx = ecx;
 }
 
+// the entities of one type, found by scanning the pool the game keeps them in (0x40 aligned, the position at +A0 and the
+// type at +C4), marked with a cross and a line up so the person can tell which type is the items
+static void DrawMarkers(X86Context& ctx, float unit) {
+    static std::vector<uint32_t> found;
+    static std::chrono::steady_clock::time_point scanned;
+    static uint32_t scanned_kind = ~0u;
+    uint32_t want = Opt().marker_kind;
+    auto now = std::chrono::steady_clock::now();
+    if (want != scanned_kind || now - scanned > std::chrono::milliseconds(500)) {
+        scanned = now, scanned_kind = want;
+        found.clear();
+        for (uint32_t at = 0x81500000; at < 0x81800000 && found.size() < 300; at += 0x40) {
+            if (!mem::IsCommitted(at) || !mem::IsCommitted(at + 0xD0)) continue;
+            if (R32(at + kCharKind) != want) continue;
+            float f[3] = {G<float>(at + kCharPosition), G<float>(at + kCharPosition + 4), G<float>(at + kCharPosition + 8)};
+            if (!std::isfinite(f[0]) || !std::isfinite(f[1]) || !std::isfinite(f[2])) continue;
+            if (std::fabs(f[0]) > 3000 || std::fabs(f[1]) > 3000 || std::fabs(f[2]) > 3000) continue;
+            if (std::fabs(f[0]) + std::fabs(f[1]) + std::fabs(f[2]) < 0.5f) continue;
+            found.push_back(at);
+        }
+    }
+    uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
+    float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
+    float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
+    static const uint32_t buffer = mem::AllocSystem(kBloodVertices * sizeof(Vertex), 16);
+    static const uint32_t offset = mem::AllocSystem(8, 16);
+    static const uint32_t colours = mem::AllocSystem(kBloodVertices * 4 * sizeof(float), 16);
+    static const float yellow[4] = {1.0f, 0.9f, 0.1f, 1.0f};
+    BloodOut o;
+    o.first = o.v = static_cast<Vertex*>(HostPtr(buffer));
+    o.end = o.first + kBloodVertices;
+    o.colour = static_cast<float*>(HostPtr(colours));
+    float width = 2.0f * unit, arm = 8.0f * unit;
+    for (uint32_t at : found) {
+        float pos[3] = {G<float>(at + kCharPosition), G<float>(at + kCharPosition + 4), G<float>(at + kCharPosition + 8)};
+        float top[3] = {pos[0], pos[1] + 1.5f, pos[2]}, a[2], b[2];
+        if (!Project(pos, vx, vy, vw, vh, a) || !Project(top, vx, vy, vw, vh, b)) continue;
+        BloodQuad(o, a[0], a[1], b[0], b[1], width, yellow);
+        BloodQuad(o, b[0] - arm, b[1] - arm, b[0] + arm, b[1] + arm, width, yellow);
+        BloodQuad(o, b[0] - arm, b[1] + arm, b[0] + arm, b[1] - arm, width, yellow);
+    }
+    if (o.v == o.first) return;
+    W32(offset, 0);
+    W32(offset + 4, 0);
+    uint32_t eax = ctx.eax, ecx = ctx.ecx;
+    ctx.eax = uint32_t(o.v - o.first) / 3;
+    ctx.ecx = buffer;
+    CallGuest(ctx, kTriangles, {offset, colours});
+    ctx.eax = eax;
+    ctx.ecx = ecx;
+}
+
 // the ESP's lines and the blood, between the 2D layer's begin and end
 void DrawEsp(X86Context& ctx, float unit) {
     if (!g_camera || !R32(kWorld)) return;
     if (Opt().esp) DrawLines(ctx, unit);
     if (Opt().blood) DrawBlood(ctx, unit);
+    if (Opt().marker_kind) DrawMarkers(ctx, unit);
 }
 
 }  // namespace game

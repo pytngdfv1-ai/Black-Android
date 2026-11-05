@@ -47,6 +47,7 @@ struct Options {
     uint32_t audio_output = 0;  // audio::kOutputAuto, kOutputStereo, kOutputSurround or kOutputMono
     std::string language = "int";  // one of kLanguages
     bool infinite_ammo = false;  // cheat: the player's magazine and reserve never go down
+    uint32_t marker_kind = 0;  // developer: draw a marker on every entity of this type, 0 none (not saved)
     uint32_t rapid_fire = 1;  // cheat: times the player's rate of fire, 1 the game's
     bool no_recoil = false;  // cheat: the player's shots do not kick the view
     uint32_t game_speed = 100;  // cheat: percent of the game's speed, menus and films keep theirs

@@ -140,7 +140,7 @@ void DrawOverlay(X86Context& ctx, uint8_t*) {
     const TitlePage* title = CurrentTitlePage();
     std::optional<float> slide = title ? LegendSlide(*title) : std::nullopt;
     bool watermark = slide.has_value();
-    bool esp = game::Opt().esp || game::Opt().blood;
+    bool esp = game::Opt().esp || game::Opt().blood || game::Opt().marker_kind;
     if (!(fps || watermark || esp) || !font || !(h > 0)) return;
     View view{h / 480, w / h / game::Aspect()};
     float& width = G<float>(font + kFontScale);

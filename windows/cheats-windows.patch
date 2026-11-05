@@ -75,14 +75,78 @@ index 3cc2bad..b854d1e 100644
      .save = game::Save,
      .init = game::Init,
 diff --git a/src/common/menu.cpp b/src/common/menu.cpp
-index f18e05a..234654a 100644
+index f18e05a..cbc8387 100644
 --- a/src/common/menu.cpp
 +++ b/src/common/menu.cpp
-@@ -30,6 +30,11 @@
+@@ -1,4 +1,4 @@
+-// the options panel on F10
++// the cheats panel, on the touch controls' gear button or F10
+ #include <algorithm>
+ #include <atomic>
+ #include <cctype>
+@@ -12,27 +12,64 @@
+ #include <utility>
+ #include <vector>
+ 
+-#ifndef WIN32_LEAN_AND_MEAN
+-#define WIN32_LEAN_AND_MEAN
+-#endif
+-#ifndef NOMINMAX
+-#define NOMINMAX
+-#endif
+-#include <windows.h>
+-
++#include <SDL3/SDL.h>
+ #include <imgui.h>
++#include <imgui_internal.h>
+ 
+ #include "app/app.h"
+ #include "audio/output.h"
+-#include "common/gyro.h"
++#include "common/keys.h"
+ #include "common/menu.h"
+-#include "common/monitor.h"
  #include "common/mouse_keyboard.h"
  #include "common/options.h"
  #include "common/translations.h"
 +#include "game/weapons.h"
++
++// native/gyro.cpp: aiming by turning the phone
++namespace gyro {
++uint32_t CurrentMode();
++const char* ModeName();
++void SetMode(uint32_t mode);
++float Sensitivity();
++void SetSensitivity(float s);
++bool InvertX();
++bool InvertY();
++void SetInvert(bool x, bool y);
++}  // namespace gyro
++
++// native/touch.cpp: the touch controls' layout
++namespace touch {
++const char* LayoutName();
++void StepLayout(int step);
++uint32_t ControlsOpacity();
++void StepOpacity(int step);
++uint32_t ControlsSize();
++void StepSize(int step);
++void EditLayout();
++const char* SkinName();
++void StepSkin(int step);
++const char* StickModeName();
++void StepStickMode(int step);
++}  // namespace touch
++
++// native/dynamic_resolution.cpp: the render resolution in use, percent of the screen's
++namespace dynres {
++uint32_t Percent();
++}  // namespace dynres
++
++// native/update.cpp: the activity asks GitHub for a newer release and says what it found
++namespace host {
++void CheckForUpdates();
++}  // namespace host
 +
 +namespace game {
 +void DumpObjects();  // objects.cpp
@@ -90,22 +154,182 @@ index f18e05a..234654a 100644
  
  namespace app {
  
-@@ -239,7 +244,9 @@ enum RowId { kDisplayMode, kResolution, kRenderResolution, kMaxFps, kVsync, kFps
-              kGyroAiming, kGyroSensitivity, kAimAssist, kGyroAxis, kGyroButton, kGyroButtonMode, kGyroRecenter,
-              kGyroCalibrate, kColourBlind, kSensitivityVertical, kAimHorizontal, kAimVertical, kInvertMouseX,
-              kControllerVertical, kPadAimHorizontal, kPadAimVertical, kInvertPadX, kTextureReplacement,
++Settings DefaultSettings();  // native/main.cpp: a phone's first run, unlimited frame rate and vsync off
++
+ namespace {
+ 
+ std::atomic<bool> g_open{false};
+@@ -61,23 +98,20 @@ constexpr std::pair<ImGuiCol, ImVec4> kPanelColors[] = {
+ 
+ constexpr uint32_t kAnisoValues[] = {0, 2, 4, 8, 16};
+ const char* const kAnisoNames[] = {"GAME DEFAULT", "2x", "4x", "8x", "16x"};
+-constexpr uint32_t kDistances[] = {1, 2, 4, 8, 12, 16};
+-const char* const kDistanceNames[] = {"GAME DEFAULT", "2x", "4x", "8x", "12x", "16x"};
+-constexpr uint32_t kMsaaValues[] = {0, 2, 4, 8};
+-const char* const kMsaaNames[] = {"OFF", "2x", "4x", "8x"};
+-constexpr uint32_t kAoValues[] = {0, 1, 2};
+-const char* const kAoNames[] = {"OFF", "SSAO", "GTAO"};
++constexpr uint32_t kDistances[] = {1, 2, 4, 8};
++const char* const kDistanceNames[] = {"GAME DEFAULT", "2x", "4x", "8x"};
++constexpr uint32_t kAntiAliasings[] = {0, 1, 2};
++const char* const kAntiAliasingNames[] = {"OFF", "FXAA", "SSAA 2X"};
+ constexpr uint32_t kFmvScales[] = {0, 1};
+ const char* const kFmvScaleNames[] = {"FILL", "4:3"};
+-constexpr uint32_t kColourBlindModes[] = {0, 1, 2, 3};
+-const char* const kColourBlindNames[] = {"OFF", "PROTANOPIA", "DEUTERANOPIA", "TRITANOPIA"};
+-constexpr uint32_t kDumpFormats[] = {0, 1};
+-const char* const kDumpFormatNames[] = {"PNG", "DDS"};
++constexpr uint32_t kScreenFilters[] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
++const char* const kScreenFilterNames[] = {"OFF",  "CRT LIGHT", "CRT STRONG",   "SHARPEN", "VIBRANT",
++                                          "NOIR", "SEPIA",     "NIGHT VISION", "VHS"};
+ constexpr uint32_t kAudioOutputs[] = {audio::kOutputAuto, audio::kOutputMono, audio::kOutputStereo,
+                                       audio::kOutputSurround};
+ const char* const kAudioOutputNames[] = {"AUTOMATIC", "MONO", "2.0 STEREO", "5.1 SURROUND"};
+-// "auto" then game::kLanguages
+-const char* const kLanguageNames[] = {"AUTOMATIC", "ENGLISH", "FRENCH", "GERMAN", "ITALIAN", "SPANISH"};
++const char* const kLanguageNames[] = {"ENGLISH", "FRENCH", "GERMAN", "ITALIAN", "SPANISH",
++                                      "INDONESIAN"};  // as game::kLanguages
+ constexpr uint32_t kFpsCaps[] = {30, 60, 75, 90, 120, 144, 165, 240, 360, kFpsCapRefresh, 0};
+ 
+ int StepIndex(int index, int step, int count) {
+@@ -116,25 +150,6 @@ int StepRange(int value, int lo, int hi, int inc, int step) {
+     return lo + inc * StepIndex((std::clamp(value, lo, hi) - lo) / inc, step, count);
+ }
+ 
+-// the monitor's modes smallest first, so Left steps down; the primary's for empty
+-std::vector<Mode> Modes(const std::string& monitor) {
+-    std::vector<Mode> modes;
+-    std::wstring device(monitor.begin(), monitor.end());
+-    const wchar_t* name = device.empty() ? nullptr : device.c_str();
+-    DEVMODEW dm{};
+-    dm.dmSize = sizeof(dm);
+-    for (DWORD i = 0; EnumDisplaySettingsW(name, i, &dm); i++) {
+-        if (dm.dmBitsPerPel < 32 || dm.dmPelsWidth < 640) continue;
+-        Mode m{dm.dmPelsWidth, dm.dmPelsHeight};
+-        auto same = [&](const Mode& o) { return o.width == m.width && o.height == m.height; };
+-        if (std::none_of(modes.begin(), modes.end(), same)) modes.push_back(m);
+-    }
+-    std::sort(modes.begin(), modes.end(), [](const Mode& a, const Mode& b) {
+-        return a.width != b.width ? a.width < b.width : a.height < b.height;
+-    });
+-    return modes;
+-}
+-
+ void Section(const char* title) {
+     float em = ImGui::GetFontSize();
+     ImGui::Dummy(ImVec2(0, em * 0.5f));
+@@ -225,67 +240,149 @@ void Flip(bool& on, int step) {
+ }
+ 
+ // applies and saves
+-void Changed(bool display) {
+-    if (display) ApplyDisplay();
++void Changed() {
+     audio::SetOutputMode(game::Opt().audio_output);
+     Save();
+ }
+ 
+-enum RowId { kDisplayMode, kResolution, kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlur,
+-             kSkipIntros, kSensitivity, kInvertMouse, kWalkSpeed, kFov, kViewmodelFov, kHoldAim, kDrawDistance, kMsaa,
+-             kAmbientOcclusion, kAudioOutput, kHdrOutput, kMonitor, kLanguage, kSmaa,
+-             kPauseOnFocusLoss, kFmvScale,
+-             kControllerHoldAim, kControllerSensitivity, kRumbleIntensity, kMenuAnimations,
+-             kGyroAiming, kGyroSensitivity, kAimAssist, kGyroAxis, kGyroButton, kGyroButtonMode, kGyroRecenter,
+-             kGyroCalibrate, kColourBlind, kSensitivityVertical, kAimHorizontal, kAimVertical, kInvertMouseX,
+-             kControllerVertical, kPadAimHorizontal, kPadAimVertical, kInvertPadX, kTextureReplacement,
 -             kTextureDumping, kDumpFormat, kDeadZone };
-+             kTextureDumping, kDumpFormat, kDeadZone,
-+             kInfiniteAmmo, kInfiniteGrenades, kRapidFire, kNoRecoil, kGodMode, kOneHitKill, kEsp, kAimbot,
-+             kGameSpeed, kUnlockLevels, kUnlockBlackOps, kLogObjects, kBlood };
++enum RowId { kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlur, kSkipIntros, kSensitivity,
++             kInvertMouse, kWalkSpeed, kFov, kViewmodelFov, kHoldAim, kDrawDistance, kAudioOutput, kLanguage,
++             kFmvScale, kGyro, kGyroSensitivity, kTouchLayout, kTouchOpacity, kTouchSize, kTouchEdit,
++             kInfiniteAmmo, kRapidFire, kNoRecoil, kGameSpeed, kGodMode, kOneHitKill, kInfiniteGrenades,
++             kCheckUpdates, kTouchSensitivity, kLeftDeadzone, kRightDeadzone, kLeftSensitivity, kRightSensitivity,
++             kScreenFilter, kGyroInvertX, kGyroInvertY, kUnlockLevels, kUnlockBlackOps, kTouchSkin, kCredit, kBloom,
++             kFog, kAntiAliasing, kHdr, kEsp, kAimbot, kTouchStick, kDynamicRes, kDynamicTarget, kDynamicMin,
++             kDynamicMax, kDynamicHold, kLogObjects, kBlood, kMarkerKind };
  
  using rows::Kind;
  using rows::Row;
-@@ -318,6 +325,27 @@ constexpr Row kControllerRows[] = {
-     {Kind::Value, kGyroCalibrate, "CALIBRATE GYRO"},
- };
  
-+// the CHEATS tab
+-constexpr Row kSettingsRows[] = {
++// the recomp's settings in pages of their own, grouped within; the game's options menu shows the headings too
++constexpr Row kGraphicsRows[] = {
+     {Kind::Heading, -1, "DISPLAY"},
+-    {Kind::Value, kMonitor, "MONITOR"},
+-    {Kind::Value, kDisplayMode, "DISPLAY MODE"},
+-    {Kind::Value, kResolution, "RESOLUTION"},
+     {Kind::Value, kRenderResolution, "RENDER RESOLUTION"},
+     {Kind::Value, kFov, "FIELD OF VIEW"},
+     {Kind::Value, kViewmodelFov, "VIEWMODEL FIELD OF VIEW"},
++    {Kind::Value, kFmvScale, "FMV SCALE"},
++    {Kind::Value, kScreenFilter, "SCREEN FILTER"},
++    {Kind::Heading, -1, "PERFORMANCE"},
+     {Kind::Value, kVsync, "VERTICAL SYNC"},
+-    {Kind::Value, kHdrOutput, "HDR OUTPUT"},
+     {Kind::Value, kMaxFps, "MAX FRAME RATE"},
+     {Kind::Value, kFpsCounter, "FPS COUNTER"},
+-    {Kind::Value, kFmvScale, "FMV SCALE"},
+-    {Kind::Value, kColourBlind, "COLOUR BLIND MODE"},
+-    {Kind::Heading, -1, "GRAPHICS"},
+-    {Kind::Value, kMsaa, "MSAA"},
+-    {Kind::Value, kSmaa, "SMAA"},
++    {Kind::Value, kDynamicRes, "DYNAMIC RESOLUTION"},
++    {Kind::Value, kDynamicTarget, "TARGET FRAME RATE"},
++    {Kind::Value, kDynamicMin, "MIN RESOLUTION"},
++    {Kind::Value, kDynamicMax, "MAX RESOLUTION"},
++    {Kind::Value, kDynamicHold, "HOLD BEFORE RAISING"},
++    {Kind::Heading, -1, "QUALITY"},
+     {Kind::Value, kAniso, "ANISOTROPIC FILTERING"},
+     {Kind::Value, kDrawDistance, "DRAW DISTANCE"},
+-    {Kind::Value, kAmbientOcclusion, "AMBIENT OCCLUSION"},
+     {Kind::Value, kReloadBlur, "RELOAD BLUR"},
+-    {Kind::Heading, -1, "GENERAL"},
+-    {Kind::Value, kSkipIntros, "SKIP INTROS"},
+-    {Kind::Value, kMenuAnimations, "MENU ANIMATIONS"},
+-    {Kind::Value, kPauseOnFocusLoss, "PAUSE ON FOCUS LOSS"},
++    {Kind::Value, kBloom, "BLOOM"},
++    {Kind::Value, kFog, "FOG"},
++    {Kind::Value, kAntiAliasing, "ANTI-ALIASING"},
++    {Kind::Value, kHdr, "HDR"},
++};
++
++constexpr Row kTouchRows[] = {
++    {Kind::Heading, -1, "TOUCH"},
++    {Kind::Value, kTouchSensitivity, "TOUCH SENSITIVITY"},
++    {Kind::Value, kTouchLayout, "CONTROLS LAYOUT"},
++    {Kind::Value, kTouchOpacity, "CONTROLS OPACITY"},
++    {Kind::Value, kTouchSize, "CONTROLS SIZE"},
++    {Kind::Value, kTouchSkin, "BUTTON STYLE"},
++    {Kind::Value, kTouchStick, "ANALOG STICK"},
++    {Kind::Value, kTouchEdit, "EDIT CONTROLS POSITION"},
++    {Kind::Heading, -1, "MOTION CONTROLS"},
++    {Kind::Value, kGyro, "GYROSCOPE"},
++    {Kind::Value, kGyroSensitivity, "GYRO SENSITIVITY"},
++    {Kind::Value, kGyroInvertX, "GYRO INVERT X"},
++    {Kind::Value, kGyroInvertY, "GYRO INVERT Y"},
++};
++
++// on the game's control setup page, under its own rows
++constexpr Row kControllerRows[] = {
++    {Kind::Value, kLeftDeadzone, "LEFT STICK DEADZONE"},
++    {Kind::Value, kRightDeadzone, "RIGHT STICK DEADZONE"},
++    {Kind::Value, kLeftSensitivity, "LEFT STICK SENSITIVITY"},
++    {Kind::Value, kRightSensitivity, "RIGHT STICK SENSITIVITY"},
++};
++
++// LANGUAGE always shows: Indonesian is there whatever the disc
++constexpr Row kGeneralRows[] = {
+     {Kind::Value, kLanguage, "LANGUAGE"},
++    {Kind::Value, kSkipIntros, "SKIP INTROS"},
+     {Kind::Value, kAudioOutput, "AUDIO OUTPUT"},
+-    {Kind::Heading, -1, "TEXTURES"},
+-    {Kind::Value, kTextureReplacement, "TEXTURE REPLACEMENT"},
+-    {Kind::Value, kTextureDumping, "TEXTURE DUMPING"},
+-    {Kind::Value, kDumpFormat, "DUMP FORMAT"},
++    {Kind::Heading, -1, "UPDATES"},
++    {Kind::Value, kCheckUpdates, "CHECK FOR UPDATES"},
++};
++
++// a page of its own, apart from the recomp's settings
 +constexpr Row kCheatRows[] = {
 +    {Kind::Heading, -1, "WEAPONS"},
 +    {Kind::Value, kInfiniteAmmo, "INFINITE AMMO"},
@@ -124,15 +348,111 @@ index f18e05a..234654a 100644
 +    {Kind::Value, kUnlockBlackOps, "UNLOCK BLACK OPS"},
 +    {Kind::Heading, -1, "DEVELOPER"},
 +    {Kind::Value, kLogObjects, "LOG OBJECTS TO THE LOG FILE"},
++    {Kind::Value, kMarkerKind, "MARK ENTITY TYPE (FIND ITEMS)"},
 +};
 +
++// the title menu's CREDITS page: who and what, and the links, which open in the browser. Its rows take no step; a
++// row's id is kCredit and its place in kCredits
++struct Credit {
++    const char* label;  // a heading when there is no value
++    const char* value;
++    const char* url;
++};
++constexpr Credit kCredits[] = {
++    {"CONTRIBUTORS", nullptr, nullptr},
++    {"Rangga Casper", "ANDROID PORT", "https://github.com/RanggaCasper"},
++    {"DATFOOLDIVE", "ANY WEAPON IN ANY LEVEL", "https://github.com/datfooldive"},
++    {"BAGASROMADON", "BUTTON SKIN", "https://github.com/bagasromadon"},
++    {"Zukiru", "HDR SHADER", nullptr},
++    {"BUILT WITH", nullptr, nullptr},
++    {"XBOXXBE-RECOMP", "TGP482", nullptr},
++    {"SDL3, GLSLANG, TOML++", "LIBRARIES", nullptr},
++    {"DEAR IMGUI", "LIBRARY", nullptr},
++    {"XEMU, CXBX-RELOADED", "REFERENCES", nullptr},
++    {"LINKS", nullptr, nullptr},
++    {"YOUTUBE", "OPEN", "https://youtube.com/c/@RanggaCasper"},
++    {"GITHUB", "OPEN", "https://github.com/RanggaCasper"},
++    {"SUPPORT", "OPEN", "https://sociabuzz.com/racas/tribe"},
+ };
+ 
++const std::vector<Row>& CreditRows() {
++    static const std::vector<Row> list = [] {
++        std::vector<Row> out;
++        for (const Credit& c : kCredits) out.push_back({c.value ? Kind::Value : Kind::Heading, kCredit, c.label});
++        return out;
++    }();
++    return list;
++}
++
++const Credit* CreditOf(const Row& row) {
++    for (const Credit& c : kCredits)
++        if (row.label == c.label) return &c;
++    return nullptr;
++}
++
+ const std::vector<Row>& InputRows() {
+     static const std::vector<Row> list = [] {
+         std::vector<Row> out = {{Kind::Heading, -1, "MOUSE"},
+-                                {Kind::Value, kSensitivity, "MOUSE HORIZONTAL SENSITIVITY"},
+-                                {Kind::Value, kSensitivityVertical, "MOUSE VERTICAL SENSITIVITY"},
+-                                {Kind::Value, kAimHorizontal, "AIM HORIZONTAL SENSITIVITY"},
+-                                {Kind::Value, kAimVertical, "AIM VERTICAL SENSITIVITY"},
+-                                {Kind::Value, kInvertMouseX, "INVERT X AXIS"},
+-                                {Kind::Value, kInvertMouse, "INVERT Y AXIS"},
++                                {Kind::Value, kSensitivity, "MOUSE SENSITIVITY"},
++                                {Kind::Value, kInvertMouse, "INVERT LOOK"},
+                                 {Kind::Value, kHoldAim, "HOLD TO AIM"},
+                                 {Kind::Heading, -1, "KEYBOARD"}};
+         size_t count = 0;
+@@ -297,104 +394,34 @@ const std::vector<Row>& InputRows() {
+     return list;
+ }
+ 
+-constexpr Row kControllerRows[] = {
+-    {Kind::Heading, -1, "GENERAL"},
+-    {Kind::Value, kControllerHoldAim, "HOLD TO AIM"},
+-    {Kind::Value, kAimAssist, "AIM ASSIST"},
+-    {Kind::Value, kControllerSensitivity, "HORIZONTAL SENSITIVITY"},
+-    {Kind::Value, kControllerVertical, "VERTICAL SENSITIVITY"},
+-    {Kind::Value, kPadAimHorizontal, "AIM HORIZONTAL SENSITIVITY"},
+-    {Kind::Value, kPadAimVertical, "AIM VERTICAL SENSITIVITY"},
+-    {Kind::Value, kInvertPadX, "INVERT X AXIS"},
+-    {Kind::Value, kDeadZone, "DEADZONE"},
+-    {Kind::Value, kRumbleIntensity, "RUMBLE INTENSITY"},
+-    {Kind::Heading, -1, "GYRO"},
+-    {Kind::Value, kGyroAiming, "GYRO AIMING"},
+-    {Kind::Value, kGyroSensitivity, "GYRO SENSITIVITY"},
+-    {Kind::Value, kGyroAxis, "GYRO AXIS"},
+-    {Kind::Value, kGyroButton, "GYRO BUTTON"},
+-    {Kind::Value, kGyroButtonMode, "GYRO BUTTON MODE"},
+-    {Kind::Value, kGyroRecenter, "RECENTER BUTTON"},
+-    {Kind::Value, kGyroCalibrate, "CALIBRATE GYRO"},
+-};
+-
  // the setting an ON / OFF row flips, nullptr for any other row
  bool* ToggleFlag(Settings& s, int id) {
      game::Options& o = game::Opt();
-@@ -339,6 +367,16 @@ bool* ToggleFlag(Settings& s, int id) {
-         case kControllerHoldAim: return &o.controller_hold_aim;
-         case kGyroAiming: return &o.gyro.enabled;
-         case kAimAssist: return &o.aim_assist;
+     switch (id) {
+         case kVsync: return &s.vsync;
+         case kFpsCounter: return &o.fps_counter;
+-        case kHdrOutput: return &o.hdr_output;
+         case kReloadBlur: return &o.reload_blur;
+-        case kSmaa: return &o.smaa;
++        case kBloom: return &o.bloom;
++        case kFog: return &o.fog;
++        case kHdr: return &o.hdr;
+         case kSkipIntros: return &o.skip_intros;
+-        case kMenuAnimations: return &o.menu_animations;
+-        case kPauseOnFocusLoss: return &o.pause_on_focus_loss;
+         case kInvertMouse: return &o.invert_mouse;
+-        case kInvertMouseX: return &o.invert_mouse_x;
+-        case kTextureReplacement: return &s.custom_textures;
+-        case kTextureDumping: return &s.dump_textures;
+-        case kInvertPadX: return &o.invert_controller_x;
+         case kHoldAim: return &o.hold_aim;
+-        case kControllerHoldAim: return &o.controller_hold_aim;
+-        case kGyroAiming: return &o.gyro.enabled;
+-        case kAimAssist: return &o.aim_assist;
 +        case kInfiniteAmmo: return &o.infinite_ammo;
 +        case kNoRecoil: return &o.no_recoil;
 +        case kGodMode: return &o.god_mode;
@@ -143,20 +463,237 @@ index f18e05a..234654a 100644
 +        case kEsp: return &o.esp;
 +        case kBlood: return &o.blood;
 +        case kAimbot: return &o.aimbot;
++        case kDynamicRes: return &o.dynamic_resolution;
          default: return nullptr;
      }
  }
-@@ -505,6 +543,30 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
+ 
+-bool DisplayRow(int id) { return id == kMonitor || id == kDisplayMode || id == kResolution; }
+-
+-// shown dimmed and left as it is: HDR output without an HDR display
+-bool Greyed(int id) { return id == kHdrOutput && !game::g_hdr_display; }
+-
+-std::string g_display_monitor;  // the held monitor, beside the held display settings
+-
+-// the monitor setting to read or write beside s: the held one beside the held display settings
+-std::string& MonitorSetting(Settings& s) {
+-    if (&s == &Get()) return game::Opt().monitor;
+-    return g_display_monitor;
+-}
+-
+-// the setting's monitor in the list, the primary's index when it is not connected
+-int MonitorIndex(const std::vector<game::Display>& list, const std::string& monitor) {
+-    int primary = 0;
+-    for (size_t i = 0; i < list.size(); i++) {
+-        if (list[i].device == monitor) return int(i);
+-        if (list[i].primary) primary = int(i);
+-    }
+-    return primary;
+-}
+-
+-// the mode shown, stepped first when step is not zero
+-Mode StepResolution(Settings& s, int step) {
+-    static std::map<std::string, std::vector<Mode>> cache;
+-    std::vector<game::Display> monitors = game::Displays();
+-    std::string device;  // the setting's monitor, the primary when it is not connected
+-    Mode desktop = Desktop();
+-    if (!monitors.empty()) {
+-        int index = MonitorIndex(monitors, MonitorSetting(s));
+-        device = monitors[size_t(index)].device;
+-        desktop = monitors[size_t(index)].desktop;
+-    }
+-    auto [it, fresh] = cache.try_emplace(device);
+-    if (fresh) it->second = Modes(device);
+-    const std::vector<Mode>& modes = it->second;
+-    Mode m = s.width && s.height ? Mode{s.width, s.height} : desktop;
+-    int i = 0;
+-    for (size_t k = 0; k < modes.size(); k++) {
+-        if (modes[k].width == m.width && modes[k].height == m.height) i = int(k);
+-    }
+-    if (step && !modes.empty()) {
+-        m = modes[size_t(StepIndex(i, step, int(modes.size())))];
+-        // the desktop's own mode is kept as 0, which follows the desktop
+-        bool native = m.width == desktop.width && m.height == desktop.height;
+-        s.width = native ? 0 : m.width;
+-        s.height = native ? 0 : m.height;
+-    }
+-    return m;
+-}
+-
+ // both field of view rows: 45 to 140 in steps of 1, 70 the game's own
+ constexpr int kFovMin = 45;
+ constexpr int kFovMax = 140;
+@@ -404,66 +431,53 @@ void FovText(uint32_t fov, char (&text)[64]) {
+     std::snprintf(text, sizeof(text), fov == kGameFov ? "%u (DEFAULT)" : "%u", fov);
+ }
+ 
+-// the monitor shown, stepped first when step is not zero
+-void StepMonitor(int step, Settings& s, char (&text)[64]) {
+-    std::vector<game::Display> list = game::Displays();
+-    if (list.empty()) {
+-        std::snprintf(text, sizeof(text), "PRIMARY");
+-        return;
+-    }
+-    int current = MonitorIndex(list, MonitorSetting(s));
+-    int i = StepIndex(current, step, int(list.size()));
+-    const game::Display& d = list[size_t(i)];
+-    // another monitor starts on its own desktop mode
+-    if (step && i != current) {
+-        MonitorSetting(s) = d.device;
+-        s.width = 0;
+-        s.height = 0;
+-    }
+-    const char* format = d.primary ? "%d: %ux%u (PRIMARY)" : "%d: %ux%u";
+-    std::snprintf(text, sizeof(text), format, d.number, d.desktop.width, d.desktop.height);
++// the dynamic resolution's frame rates to hold
++constexpr uint32_t kDynamicTargets[] = {30, 45, 60, 90, 120};
++
++// a resolution as percent of the screen's and its pixels
++void PercentText(uint32_t percent, char (&text)[64]) {
++    Mode out = Output();
++    std::snprintf(text, sizeof(text), "%u%% (%ux%u)", percent, out.width * percent / 100, out.height * percent / 100);
+ }
+ 
+ // the display rows that are no ON / OFF, stepped first; false for another row
+ bool StepDisplayRow(int id, int step, Settings& s, char (&text)[64]) {
+     game::Options& o = game::Opt();
+     switch (id) {
+-        case kMonitor:
+-            StepMonitor(step, s, text);
+-            return true;
+-        case kDisplayMode: {
+-            static const char* const kModes[] = {"FULLSCREEN", "BORDERLESS", "WINDOWED"};
+-            int count = int(std::size(kModes));
+-            if (step) s.display_mode = DisplayMode(StepIndex(int(s.display_mode), step, count));
+-            std::snprintf(text, sizeof(text), "%s", kModes[std::min(int(s.display_mode), count - 1)]);
+-            return true;
+-        }
+-        case kResolution: {
+-            Mode m = StepResolution(s, step);
+-            std::snprintf(text, sizeof(text), "%ux%u", m.width, m.height);
+-            return true;
+-        }
+         case kRenderResolution: {
+-            // 20% to 200% in steps of 5
++            // 20% to 200% in steps of 5; greyed while the dynamic resolution has it, which it shows as it is now
+             if (step) s.render_percent = uint32_t(StepRange(int(s.render_percent), 20, 200, 5, step));
+-            Mode out = Output();
+-            std::snprintf(text, sizeof(text), "%u%% (%ux%u)", s.render_percent, out.width * s.render_percent / 100,
+-                          out.height * s.render_percent / 100);
++            PercentText(o.dynamic_resolution ? dynres::Percent() : s.render_percent, text);
+             return true;
+         }
++        case kDynamicTarget:
++            std::snprintf(text, sizeof(text), "%u FPS", kDynamicTargets[StepTable(kDynamicTargets, o.dynamic_target_fps, step)]);
++            return true;
++        case kDynamicMin:
++            // 20% up to the max, the max down to the min
++            if (step) o.dynamic_min_percent = uint32_t(StepRange(int(o.dynamic_min_percent), 20, int(o.dynamic_max_percent), 5, step));
++            PercentText(o.dynamic_min_percent, text);
++            return true;
++        case kDynamicMax:
++            if (step) o.dynamic_max_percent = uint32_t(StepRange(int(o.dynamic_max_percent), int(o.dynamic_min_percent), 200, 5, step));
++            PercentText(o.dynamic_max_percent, text);
++            return true;
++        case kDynamicHold:
++            // 1 to 30 seconds
++            if (step) o.dynamic_hold = uint32_t(StepRange(int(o.dynamic_hold), 1, 30, 1, step));
++            std::snprintf(text, sizeof(text), "%u S", o.dynamic_hold);
++            return true;
+         case kFmvScale:
+             std::snprintf(text, sizeof(text), "%s", kFmvScaleNames[StepTable(kFmvScales, o.fmv_scale, step)]);
+             return true;
+-        case kColourBlind: {
+-            int mode = StepTable(kColourBlindModes, o.colour_blind, step);
+-            std::snprintf(text, sizeof(text), "%s", kColourBlindNames[mode]);
++        case kAntiAliasing:
++            std::snprintf(text, sizeof(text), "%s",
++                          kAntiAliasingNames[StepTable(kAntiAliasings, o.anti_aliasing, step)]);
+             return true;
+-        }
+-        case kDumpFormat: {
+-            int format = StepTable(kDumpFormats, s.texture_dump_format, step);
+-            std::snprintf(text, sizeof(text), "%s", kDumpFormatNames[format]);
++        case kScreenFilter:
++            std::snprintf(text, sizeof(text), "%s",
++                          kScreenFilterNames[StepTable(kScreenFilters, o.screen_filter, step)]);
+             return true;
+-        }
+         case kFov:
+             if (step) o.fov = uint32_t(StepRange(int(o.fov), kFovMin, kFovMax, 1, step));
+             FovText(o.fov, text);
+@@ -476,7 +490,7 @@ bool StepDisplayRow(int id, int step, Settings& s, char (&text)[64]) {
+             uint32_t cap = kFpsCaps[StepTable(kFpsCaps, s.fps_cap, step)];
+             if (cap == kFpsCapRefresh) std::snprintf(text, sizeof(text), "REFRESH RATE");
+             else if (cap) std::snprintf(text, sizeof(text), "%u", cap);
+-            else std::snprintf(text, sizeof(text), "UNLIMITED");
++            else std::snprintf(text, sizeof(text), "UNLIMITED (DEFAULT)");
+             return true;
+         }
+         default:
+@@ -488,15 +502,9 @@ bool StepDisplayRow(int id, int step, Settings& s, char (&text)[64]) {
+ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
+     game::Options& o = game::Opt();
+     switch (id) {
+-        case kMsaa:
+-            std::snprintf(text, sizeof(text), "%s", kMsaaNames[StepTable(kMsaaValues, o.msaa, step)]);
+-            return true;
+         case kAniso:
+             std::snprintf(text, sizeof(text), "%s", kAnisoNames[StepTable(kAnisoValues, s.aniso, step)]);
+             return true;
+-        case kAmbientOcclusion:
+-            std::snprintf(text, sizeof(text), "%s", kAoNames[StepTable(kAoValues, o.ambient_occlusion, step)]);
+-            return true;
+         case kDrawDistance:
+             std::snprintf(text, sizeof(text), "%s", kDistanceNames[StepTable(kDistances, o.draw_distance, step)]);
+             return true;
+@@ -505,99 +513,143 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
      }
  }
  
+-// both sensitivity rows: 0.1 to 5.0 in steps of 0.1
+-void StepSensitivity(float& value, int step, char (&text)[64]) {
+-    if (step) {
+-        int tenths = StepRange(int(std::lround(value * 10.0f)), 1, 50, 1, step);
+-        value = float(tenths) / 10.0f;
+-    }
+-    std::snprintf(text, sizeof(text), "%.1f", value);
+-}
+-
+-// the setting of kLanguageNames[i]
+-const char* LanguageCode(int i) { return i ? game::kLanguages[i - 1] : "auto"; }
+-
+-// one of names, stepped first
+-template <size_t N>
+-void StepName(uint32_t& value, const char* const (&names)[N], int step, char (&text)[64]) {
+-    value = uint32_t(StepIndex(int(std::min<size_t>(value, N - 1)), step, int(N)));
+-    std::snprintf(text, sizeof(text), "%s", names[value]);
+-}
+-
+-// the setting a sensitivity row steps, nullptr for any other row
+-float* Sensitivity(game::Options& o, int id) {
 +// the cheat rows that are no ON / OFF, stepped first; false for another row
 +bool StepCheatRow(int id, int step, char (&text)[64]) {
 +    game::Options& o = game::Opt();
-+    switch (id) {
+     switch (id) {
+-        case kSensitivity: return &o.mouse_sensitivity;
+-        case kSensitivityVertical: return &o.mouse_vertical_sensitivity;
+-        case kAimHorizontal: return &o.aim_horizontal_sensitivity;
+-        case kAimVertical: return &o.aim_vertical_sensitivity;
+-        case kControllerSensitivity: return &o.controller_sensitivity;
+-        case kControllerVertical: return &o.controller_vertical_sensitivity;
+-        case kPadAimHorizontal: return &o.controller_aim_horizontal_sensitivity;
+-        case kPadAimVertical: return &o.controller_aim_vertical_sensitivity;
+-        case kGyroSensitivity: return &o.gyro.sensitivity;
+-        default: return nullptr;
 +        case kLogObjects:
 +            if (step) game::DumpObjects();  // objects.cpp: the level's objects, by class, into the log
 +            std::snprintf(text, sizeof(text), "PRESS");
++            return true;
++        case kMarkerKind:
++            if (step) o.marker_kind = uint32_t(StepRange(int(o.marker_kind), 0, 60, 1, step));
++            if (!o.marker_kind) std::snprintf(text, sizeof(text), "OFF");
++            else std::snprintf(text, sizeof(text), "TYPE %u", o.marker_kind);
 +            return true;
 +        case kRapidFire:
 +            // off, then 2 to 4 times the rate
@@ -171,13 +708,167 @@ index f18e05a..234654a 100644
 +            return true;
 +        default:
 +            return false;
-+    }
-+}
-+
- // both sensitivity rows: 0.1 to 5.0 in steps of 0.1
- void StepSensitivity(float& value, int step, char (&text)[64]) {
-     if (step) {
-@@ -611,7 +673,8 @@ std::string RowText(int id, int step, Settings& s = Get()) {
+     }
+ }
+ 
+-// the general, mouse and keyboard and controller rows that are no ON / OFF, stepped first
++// the general, mouse and keyboard rows that are no ON / OFF, stepped first
+ void StepInputRow(int id, int step, char (&text)[64]) {
+     game::Options& o = game::Opt();
+-    if (float* sensitivity = Sensitivity(o, id)) {
+-        StepSensitivity(*sensitivity, step, text);
+-        return;
+-    }
+     switch (id) {
+-        case kDeadZone: {
+-            float zone = o.controller_dead_zone > 0.0f ? o.controller_dead_zone : game::kGameDeadZone;
+-            // 0.1 to 1.0 in steps of 0.1
+-            if (step) o.controller_dead_zone = float(StepRange(int(std::lround(zone * 10.0f)), 1, 10, 1, step)) / 10.0f;
+-            if (o.controller_dead_zone == 0.0f) {
+-                std::snprintf(text, sizeof(text), "%.1f (DEFAULT)", game::kGameDeadZone);
+-            } else {
+-                std::snprintf(text, sizeof(text), "%.1f", o.controller_dead_zone);
+-            }
+-            break;
+-        }
+         case kAudioOutput:
+             std::snprintf(text, sizeof(text), "%s", kAudioOutputNames[StepTable(kAudioOutputs, o.audio_output, step)]);
+             break;
+-        case kGyroAxis:
+-            StepName(o.gyro.axis, gyro::kAxisNames, step, text);
+-            break;
+-        case kGyroButton:
+-            StepName(o.gyro.button, gyro::kButtonNames, step, text);
+-            break;
+-        case kGyroButtonMode:
+-            StepName(o.gyro.button_mode, gyro::kButtonModeNames, step, text);
+-            break;
+-        case kGyroRecenter:
+-            StepName(o.gyro.recenter_button, gyro::kButtonNames, step, text);
+-            break;
+-        case kGyroCalibrate:
+-            if (step) gyro::StartCalibration();
+-            std::snprintf(text, sizeof(text), "%s", gyro::Calibrating() ? "KEEP STILL" : "START");
++        case kSensitivity:
++            // 0.1 to 5.0 in steps of 0.1
++            if (step) {
++                int tenths = StepRange(int(std::lround(o.mouse_sensitivity * 10.0f)), 1, 50, 1, step);
++                o.mouse_sensitivity = float(tenths) / 10.0f;
++            }
++            std::snprintf(text, sizeof(text), "%.1f", o.mouse_sensitivity);
+             break;
+-        case kRumbleIntensity:
+-            // 10% to 200% in steps of 10
+-            if (step) o.rumble_intensity = uint32_t(StepRange(int(o.rumble_intensity), 10, 200, 10, step));
+-            std::snprintf(text, sizeof(text), "%u%%", o.rumble_intensity);
++        case kTouchSensitivity:
++            // as the mouse's: 0.1 to 5.0 in steps of 0.1
++            if (step) {
++                int tenths = StepRange(int(std::lround(o.touch_sensitivity * 10.0f)), 1, 50, 1, step);
++                o.touch_sensitivity = float(tenths) / 10.0f;
++            }
++            std::snprintf(text, sizeof(text), "%.1f", o.touch_sensitivity);
+             break;
+         case kWalkSpeed:
+             // 10% to 100% in steps of 5
+             if (step) o.walk_speed = uint32_t(StepRange(int(o.walk_speed), 10, 100, 5, step));
+             std::snprintf(text, sizeof(text), "%u%%", o.walk_speed);
+             break;
++        case kGyro:
++            // off, always on, while firing
++            if (step) gyro::SetMode(uint32_t(StepIndex(int(gyro::CurrentMode()), step, 3)));
++            std::snprintf(text, sizeof(text), "%s", gyro::CurrentMode() == 0 ? "OFF"
++                                                    : gyro::CurrentMode() == 1 ? "ALWAYS"
++                                                                               : "WHILE FIRING");
++            break;
++        case kTouchLayout:
++            // the presets, CUSTOM once a control was moved
++            if (step) touch::StepLayout(step);
++            std::snprintf(text, sizeof(text), "%s", touch::LayoutName());
++            break;
++        case kTouchOpacity:
++            if (step) touch::StepOpacity(step);
++            std::snprintf(text, sizeof(text), "%u%%", touch::ControlsOpacity());
++            break;
++        case kTouchSize:
++            if (step) touch::StepSize(step);
++            std::snprintf(text, sizeof(text), "%u%%", touch::ControlsSize());
++            break;
++        case kTouchSkin:
++            if (step) touch::StepSkin(step);
++            std::snprintf(text, sizeof(text), "%s", touch::SkinName());
++            break;
++        case kTouchStick:
++            // under the thumb where it comes down, or fixed in its place
++            if (step) touch::StepStickMode(step);
++            std::snprintf(text, sizeof(text), "%s", touch::StickModeName());
++            break;
++        case kTouchEdit:
++            // any step opens the editor over the screen
++            if (step) touch::EditLayout();
++            std::snprintf(text, sizeof(text), "OPEN");
++            break;
++        case kCheckUpdates:
++            // any step asks; the answer comes in a dialog over the game
++            if (step) host::CheckForUpdates();
++            std::snprintf(text, sizeof(text), "CHECK");
++            break;
++        case kGyroSensitivity:
++            // 0.1 to 5.0 in steps of 0.1
++            if (step) gyro::SetSensitivity(float(StepRange(int(std::lround(gyro::Sensitivity() * 10.0f)), 1, 50, 1, step)) / 10.0f);
++            std::snprintf(text, sizeof(text), "%.1f", gyro::Sensitivity());
++            break;
++        case kGyroInvertX:
++        case kGyroInvertY: {
++            // kept with the gyro's other settings in android.toml, so not one of ToggleFlag's
++            bool x = gyro::InvertX(), y = gyro::InvertY();
++            if (step) (id == kGyroInvertX ? x : y) ^= true;
++            if (step) gyro::SetInvert(x, y);
++            std::snprintf(text, sizeof(text), "%s", OnOff(id == kGyroInvertX ? x : y));
++            break;
++        }
++        case kLeftDeadzone:
++        case kRightDeadzone: {
++            // 0% to 50% of the stick's travel in steps of 1, 0 leaves the game's own
++            uint32_t& dz = id == kLeftDeadzone ? o.left_deadzone : o.right_deadzone;
++            if (step) dz = uint32_t(StepRange(int(dz), 0, 50, 1, step));
++            std::snprintf(text, sizeof(text), dz ? "%u%%" : "%u%% (DEFAULT)", dz);
++            break;
++        }
++        case kLeftSensitivity:
++        case kRightSensitivity: {
++            // 0.1 to 3.0 in steps of 0.1
++            float& s = id == kLeftSensitivity ? o.left_sensitivity : o.right_sensitivity;
++            if (step) s = float(StepRange(int(std::lround(s * 10.0f)), 1, 30, 1, step)) / 10.0f;
++            std::snprintf(text, sizeof(text), "%.1f", s);
++            break;
++        }
+         case kLanguage: {
+-            int count = int(std::size(kLanguageNames));
++            int count = int(std::size(game::kLanguages));
+             int i = 0;
+-            while (i < count - 1 && o.language != LanguageCode(i)) i++;
++            while (i < count - 1 && o.language != game::kLanguages[i]) i++;
++            // past the languages this disc has no strings for; English and Indonesian are always there
+             if (step) {
+-                i = StepIndex(i, step, count);
+-                o.language = LanguageCode(i);
++                do i = StepIndex(i, step, count);
++                while (!game::LanguageAvailable(game::kLanguages[i]));
++                o.language = game::kLanguages[i];
+             }
+-            bool restart = game::ResolveLanguage(o.language) != game::BootLanguage();
+-            const char* format = restart ? "%s (RESTART)" : "%s";
++            const char* format = o.language == game::BootLanguage() ? "%s" : "%s (RESTART)";
+             std::snprintf(text, sizeof(text), format, kLanguageNames[i]);
+             break;
+         }
+@@ -606,15 +658,15 @@ void StepInputRow(int id, int step, char (&text)[64]) {
+ 
+ // steps the value first when step is not zero
+ std::string RowText(int id, int step, Settings& s = Get()) {
+-    if (Greyed(id)) return "NOT SUPPORTED";
+     char text[64] = "";
      if (bool* on = ToggleFlag(s, id)) {
          Flip(*on, step);
          std::snprintf(text, sizeof(text), "%s", OnOff(*on));
@@ -186,62 +877,223 @@ index f18e05a..234654a 100644
 +               !StepCheatRow(id, step, text)) {
          StepInputRow(id, step, text);
      }
-     if (step && &s == &Get()) Changed(DisplayRow(id));
-@@ -626,10 +689,11 @@ std::string KeyText(std::string keys) {
+-    if (step && &s == &Get()) Changed(DisplayRow(id));
++    if (step && &s == &Get()) Changed();
+     return text;
+ }
+ 
+@@ -626,56 +678,62 @@ std::string KeyText(std::string keys) {
      return keys;
  }
  
 -const char* const kPages[] = {"RECOMP SETTINGS", "MOUSE AND KEYBOARD", "CONTROLLER"};
-+const char* const kPages[] = {"RECOMP SETTINGS", "MOUSE AND KEYBOARD", "CONTROLLER", "CHEATS"};
- constexpr int kSettingsPage = 0;
- constexpr int kKeyboardPage = 1;
- constexpr int kControllerPage = 2;
-+constexpr int kCheatsPage = 3;  // F10 panel only, the game's own options menu has no page for it
+-constexpr int kSettingsPage = 0;
+-constexpr int kKeyboardPage = 1;
+-constexpr int kControllerPage = 2;
+-
+-// the MOUSE AND KEYBOARD page's values, its binds aside
+-void CopyKeyboardValues(game::Options& to, const game::Options& from) {
+-    to.mouse_sensitivity = from.mouse_sensitivity;
+-    to.mouse_vertical_sensitivity = from.mouse_vertical_sensitivity;
+-    to.aim_horizontal_sensitivity = from.aim_horizontal_sensitivity;
+-    to.aim_vertical_sensitivity = from.aim_vertical_sensitivity;
+-    to.invert_mouse = from.invert_mouse;
+-    to.invert_mouse_x = from.invert_mouse_x;
+-    to.hold_aim = from.hold_aim;
+-    to.walk_speed = from.walk_speed;
+-}
+-
+-void CopyControllerValues(game::Options& to, const game::Options& from) {
+-    to.controller_hold_aim = from.controller_hold_aim;
+-    to.aim_assist = from.aim_assist;
+-    to.controller_sensitivity = from.controller_sensitivity;
+-    to.controller_vertical_sensitivity = from.controller_vertical_sensitivity;
+-    to.controller_aim_horizontal_sensitivity = from.controller_aim_horizontal_sensitivity;
+-    to.controller_aim_vertical_sensitivity = from.controller_aim_vertical_sensitivity;
+-    to.invert_controller_x = from.invert_controller_x;
+-    to.controller_dead_zone = from.controller_dead_zone;
+-    to.rumble_intensity = from.rumble_intensity;
+-    to.gyro = from.gyro;
+-}
++// as options_menu.cpp's pages: 0 graphics
++constexpr int kTouchPage = 1;
++constexpr int kGeneralPage = 2;
++constexpr int kKeyboardPage = 3;
++constexpr int kCheatsPage = 4;
++constexpr int kCreditsPage = 5;
  
- // the MOUSE AND KEYBOARD page's values, its binds aside
- void CopyKeyboardValues(game::Options& to, const game::Options& from) {
-@@ -656,8 +720,28 @@ void CopyControllerValues(game::Options& to, const game::Options& from) {
-     to.gyro = from.gyro;
- }
- 
-+void CopyCheatValues(game::Options& to, const game::Options& from) {
-+    to.infinite_ammo = from.infinite_ammo;
-+    to.rapid_fire = from.rapid_fire;
-+    to.no_recoil = from.no_recoil;
-+    to.game_speed = from.game_speed;
-+    to.god_mode = from.god_mode;
-+    to.one_hit_kill = from.one_hit_kill;
-+    to.infinite_grenades = from.infinite_grenades;
-+    to.unlock_levels = from.unlock_levels;
-+    to.unlock_black_ops = from.unlock_black_ops;
-+    to.esp = from.esp;
-+    to.blood = from.blood;
-+    to.aimbot = from.aimbot;
-+}
-+
  void RestoreDefaults(int page) {
      game::Options& o = game::Opt();
+-    if (page == kControllerPage) {
+-        CopyControllerValues(o, game::Options{});
+-        Save();
 +    if (page == kCheatsPage) {
-+        CopyCheatValues(o, game::Options{});
-+        Save();
-+        return;
-+    }
-     if (page == kControllerPage) {
-         CopyControllerValues(o, game::Options{});
-         Save();
-@@ -674,6 +758,7 @@ void RestoreDefaults(int page) {
++        game::Options none;
++        o.infinite_ammo = none.infinite_ammo;
++        o.rapid_fire = none.rapid_fire;
++        o.no_recoil = none.no_recoil;
++        o.game_speed = none.game_speed;
++        o.god_mode = none.god_mode;
++        o.one_hit_kill = none.one_hit_kill;
++        o.infinite_grenades = none.infinite_grenades;
++        o.unlock_levels = none.unlock_levels;
++        o.unlock_black_ops = none.unlock_black_ops;
++        o.esp = none.esp;
++        o.blood = none.blood;
++        o.aimbot = none.aimbot;
++        Changed();
+         return;
+     }
+     if (page == kKeyboardPage) {
+-        CopyKeyboardValues(o, game::Options{});
++        o.mouse_sensitivity = game::Options{}.mouse_sensitivity;
++        o.invert_mouse = false;
++        o.hold_aim = true;
++        o.walk_speed = game::Options{}.walk_speed;
+         input::ResetBindings();
+         return;
+     }
+     game::Options keep = o;
+-    Get() = Settings{};
+-    Get().custom_textures = game::kCustomTexturesDefault;
++    Get() = DefaultSettings();
      o = game::Options{};
-     CopyKeyboardValues(o, keep);
-     CopyControllerValues(o, keep);
-+    CopyCheatValues(o, keep);  // the CHEATS tab has its own defaults
+-    CopyKeyboardValues(o, keep);
+-    CopyControllerValues(o, keep);
++    o.mouse_sensitivity = keep.mouse_sensitivity;
++    o.invert_mouse = keep.invert_mouse;
++    o.hold_aim = keep.hold_aim;
++    o.walk_speed = keep.walk_speed;
      o.keys = keep.keys;
-     Changed(true);
+-    Changed(true);
++    // the cheats page has its own defaults
++    o.infinite_ammo = keep.infinite_ammo;
++    o.rapid_fire = keep.rapid_fire;
++    o.no_recoil = keep.no_recoil;
++    o.game_speed = keep.game_speed;
++    o.god_mode = keep.god_mode;
++    o.one_hit_kill = keep.one_hit_kill;
++    o.infinite_grenades = keep.infinite_grenades;
++    o.unlock_levels = keep.unlock_levels;
++    o.unlock_black_ops = keep.unlock_black_ops;
++    o.esp = keep.esp;
++    o.blood = keep.blood;
++    o.aimbot = keep.aimbot;
++    Changed();
  }
-@@ -804,6 +889,39 @@ void KeyRow(const Row& r) {
+ 
+ // the row being rebound, -1 when idle; its keys must be released before the next press binds
+@@ -684,34 +742,7 @@ int g_capture_slot = 0;  // its box: 0 the key, 1 the alternate
+ int g_hovered_box = -1;  // the box under the mouse or focused with a key in it, this frame
+ bool g_capture_armed = false;
+ int g_capture_done = 0;  // frame of the last bind, the key that bound must not start another
+-int g_page = kSettingsPage;
+-// the monitor, display mode and resolution wait for Apply, as Windows' display settings do; closing drops them
+-bool g_display_held = false;
+-Settings g_display;  // the held display mode and resolution
+-
+-void HoldDisplay(int id, int step) {
+-    const Settings& s = Get();
+-    if (!g_display_held) {
+-        g_display_monitor = game::Opt().monitor;
+-        g_display.display_mode = s.display_mode;
+-        g_display.width = s.width;
+-        g_display.height = s.height;
+-    }
+-    RowText(id, step, g_display);
+-    g_display_held = g_display_monitor != game::Opt().monitor || g_display.display_mode != s.display_mode ||
+-                     g_display.width != s.width || g_display.height != s.height;
+-}
+-
+-void Apply() {
+-    Settings& s = Get();
+-    game::Opt().monitor = g_display_monitor;
+-    s.display_mode = g_display.display_mode;
+-    s.width = g_display.width;
+-    s.height = g_display.height;
+-    g_display_held = false;
+-    Changed(true);
+-}
+-
++int g_page = kCheatsPage;
+ // the action's key and its alternate as their boxes show them, the alternate blank when there is none
+ std::vector<std::string> KeyBoxes(size_t action) {
+     std::string keys = input::Binding(action);
+@@ -783,14 +814,8 @@ void PollCapture() {
+ bool CaptureFree() { return g_capture < 0 && ImGui::GetFrameCount() > g_capture_done + 1; }
+ 
+ void ValueRow(const Row& r) {
+-    bool held = g_display_held && DisplayRow(r.id);
+-    bool greyed = Greyed(r.id);
+-    ImGui::BeginDisabled(greyed);
+-    int step = OptionRow(r.label, Ui(RowText(r.id, 0, held ? g_display : Get())).c_str());
+-    ImGui::EndDisabled();
+-    if (!step || greyed) return;
+-    if (DisplayRow(r.id)) HoldDisplay(r.id, step);
+-    else RowText(r.id, step);
++    int step = OptionRow(r.label, Ui(RowText(r.id, 0)).c_str());
++    if (step) RowText(r.id, step);
+ }
+ 
+ void KeyRow(const Row& r) {
+@@ -804,9 +829,7 @@ void KeyRow(const Row& r) {
      g_capture_armed = false;
  }
  
-+// the weapons the level's table has, one to take: it replaces the weapon not in hand (weapons.cpp)
+-void DrawRows(int page) {
+-    size_t count = 0;
+-    const Row* list = rows::Page(page, &count);
++void DrawList(const Row* list, size_t count) {
+     for (size_t i = 0; i < count; i++) {
+         const Row& r = list[i];
+         if (r.kind == Kind::Heading) Section(r.label);
+@@ -815,77 +838,118 @@ void DrawRows(int page) {
+     }
+ }
+ 
+-void Defaults() {
+-    g_capture = -1;
+-    if (g_page == kSettingsPage) g_display_held = false;
+-    RestoreDefaults(g_page);
++// the touch controls page ends with the sticks', which the game's options show on its control setup page
++void DrawRows(int page) {
++    size_t count = 0;
++    const Row* list = rows::Page(page, &count);
++    DrawList(list, count);
++    if (page != kTouchPage) return;
++    Section("CONTROLLER");
++    DrawList(kControllerRows, std::size(kControllerRows));
+ }
+ 
+-// one tab a page, as wide as they share the line; LB / RB step them
+-void DrawTabs() {
+-    int step = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) - ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false);
+-    // a selection made here shows from the next frame, the tab drawn this one still reads as selected
+-    bool set = step && CaptureFree();
+-    int pages = int(std::size(kPages));
+-    if (set) g_page = StepIndex(g_page, step, pages);
+-    ImGui::PushStyleColor(ImGuiCol_Tab, kTab);
+-    ImGui::PushStyleColor(ImGuiCol_TabHovered, kTabHovered);
+-    ImGui::PushStyleColor(ImGuiCol_TabSelected, kHighlight);
+-    ImGui::PushStyleColor(ImGuiCol_TabSelectedOverline, kHeading);
+-    ImGui::PushStyleVar(ImGuiStyleVar_TabRounding, 0.0f);
+-    if (ImGui::BeginTabBar("##pages")) {
+-        float gaps = ImGui::GetStyle().ItemInnerSpacing.x * float(pages - 1);
+-        float w = (ImGui::GetContentRegionAvail().x - gaps) / float(pages);
+-        for (int i = 0; i < pages; i++) {
+-            ImGui::SetNextItemWidth(w);
+-            std::string tab = Ui(kPages[i]) + "###" + kPages[i];
+-            if (ImGui::BeginTabItem(tab.c_str(), nullptr, set && i == g_page ? ImGuiTabItemFlags_SetSelected : 0)) {
+-                if (!set && i != g_page) {
+-                    g_page = i;
+-                    g_capture = -1;
+-                }
+-                ImGui::EndTabItem();
+-            }
+-        }
+-        ImGui::EndTabBar();
++// under the cheats, the level's weapons as buttons (weapons.cpp: any weapon in any level); the one given goes in the
++// slot not in hand and the game switches to it
 +void DrawWeapons() {
 +    weapons::View v = weapons::Current();
 +    Section("GIVE A WEAPON");
@@ -271,21 +1123,32 @@ index f18e05a..234654a 100644
 +        ImGui::AlignTextToFramePadding();
 +        ImGui::TextUnformatted(v.status.c_str());
 +        ImGui::PopStyleColor();
-+    }
-+}
-+
- void DrawRows(int page) {
-     size_t count = 0;
-     const Row* list = rows::Page(page, &count);
-@@ -813,6 +931,7 @@ void DrawRows(int page) {
-         else if (r.kind == Kind::Value) ValueRow(r);
-         else KeyRow(r);
      }
-+    if (page == kCheatsPage) DrawWeapons();
+-    ImGui::PopStyleVar();
+-    ImGui::PopStyleColor(4);
  }
  
- void Defaults() {
-@@ -867,6 +986,7 @@ void DrawFooter(float em) {
+-void DrawTitle() {
+-    std::string title = Ui("SETTINGS");
++void Defaults() {
++    g_capture = -1;
++    RestoreDefaults(g_page);
++}
++
++// the panel is the cheats alone, the touch button's way to them in play; every other setting is in the game's own
++// options menu
++void DrawTitle(const char* caption) {
++    std::string title = Ui(caption);
+     float title_pad = (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(title.c_str()).x) * 0.5f;
+     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(title_pad, 0.0f));
+     ImGui::TextUnformatted(title.c_str());
+ }
+ 
+-// the hint line, then Back, Defaults and Apply on the right
++// the hint line, then Back and Defaults on the right
+ void DrawFooter(float em) {
+     ImGui::Separator();
+     ImGui::PushStyleColor(ImGuiCol_Text, kDim);
      const char* hint = "";
      if (g_capture >= 0) hint = "Press a key or mouse button to bind, Escape cancels";
      else if (g_page == kKeyboardPage && g_hovered_box >= 0) hint = "Right click or Delete clears the key";
@@ -293,52 +1156,336 @@ index f18e05a..234654a 100644
      ImGui::TextUnformatted(Ui(hint, false).c_str());
      ImGui::PopStyleColor();
      float bw = em * 8;
-@@ -885,7 +1005,9 @@ void DrawPanel() {
+-    float buttons_pad = ImGui::GetContentRegionAvail().x - bw * 3 - ImGui::GetStyle().ItemSpacing.x * 2;
++    float buttons_pad = ImGui::GetContentRegionAvail().x - bw * 2 - ImGui::GetStyle().ItemSpacing.x;
+     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(buttons_pad, 0.0f));
+     if (ImGui::Button(Ui("Back", false).c_str(), ImVec2(bw, 0))) ToggleMenu();
+     ImGui::SameLine();
+     if (ImGui::Button(Ui("Defaults", false).c_str(), ImVec2(bw, 0))) Defaults();
+-    ImGui::SameLine();
+-    ImGui::BeginDisabled(!g_display_held);
+-    if (ImGui::Button(Ui("Apply", false).c_str(), ImVec2(bw, 0))) Apply();
+-    ImGui::EndDisabled();
++}
++
++// in the rows' child: a finger dragged up or down scrolls them as a phone's lists do, then glides a little when it
++// lifts. Past half an em the press is the scroll's, so the row or weapon it came down on is not clicked
++void DragScroll(float em) {
++    constexpr float kFriction = 6.0f;  // of the glide's speed lost a second
++    static bool dragging = false;
++    static float glide = 0;  // pixels a second
++    ImGuiIO& io = ImGui::GetIO();
++    // the rows, not the scrollbar beside them: that drags as it always did
++    bool inside = ImGui::GetCurrentWindow()->InnerRect.Contains(io.MouseClickedPos[0]);
++    if (ImGui::IsMouseClicked(0)) {
++        dragging = false;
++        glide = 0;
++    }
++    if (ImGui::IsMouseDown(0) && inside) {
++        if (!dragging && std::fabs(ImGui::GetMouseDragDelta(0).y) > em * 0.5f) dragging = true;
++        if (!dragging) return;
++        ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
++        if (io.DeltaTime > 0) glide = (glide - io.MouseDelta.y / io.DeltaTime) * 0.5f;  // smoothed over frames
++        ImGui::ClearActiveID();
++        return;
++    }
++    dragging = false;
++    if (std::fabs(glide) < em) {
++        glide = 0;
++        return;
++    }
++    ImGui::SetScrollY(ImGui::GetScrollY() + glide * io.DeltaTime);
++    glide *= std::max(0.0f, 1.0f - kFriction * io.DeltaTime);
+ }
+ 
+ void DrawPanel() {
      const ImGuiViewport* vp = ImGui::GetMainViewport();
      float em = ImGui::GetFontSize();
-     ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+-    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 -    ImGui::SetNextWindowSize(ImVec2(em * 50, em * 32), ImGuiCond_Always);
-+    // most of the window: the rows and the weapons list have room, never less than the old fixed size
-+    ImVec2 size(std::max(vp->Size.x * 0.92f, em * 50), std::max(vp->Size.y * 0.92f, em * 32));
-+    ImGui::SetNextWindowSize(ImVec2(std::min(size.x, vp->Size.x), std::min(size.y, vp->Size.y)), ImGuiCond_Always);
++    // full screen: the panel was a centered box that left the rows cramped on phones
++    ImGui::SetNextWindowPos(vp->Pos, ImGuiCond_Always);
++    ImGui::SetNextWindowSize(vp->Size, ImGuiCond_Always);
      for (const auto& [col, color] : kPanelColors) ImGui::PushStyleColor(col, color);
      ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
      ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-@@ -919,6 +1041,10 @@ const rows::Row* rows::Page(int page, size_t* count) {
-         *count = std::size(kControllerRows);
-         return kControllerRows;
+@@ -894,13 +958,20 @@ void DrawPanel() {
+     constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+                                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar;
+     if (ImGui::Begin("##settings", nullptr, kFlags)) {
+-        DrawTitle();
+-        DrawTabs();
++        DrawTitle("CHEATS");
++        ImGui::Separator();
+         float footer = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeightWithSpacing() + em;
++        // a scrollbar a thumb can take, not the desktop's thin one
++        ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, em * 1.4f);
++        ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarRounding, 0.0f);
++        ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, em * 2.5f);
+         ImGui::BeginChild("##rows", ImVec2(0, -footer), ImGuiChildFlags_NavFlattened);
++        DragScroll(em);
+         g_hovered_box = -1;
+         DrawRows(g_page);
++        if (g_page == kCheatsPage) DrawWeapons();
+         ImGui::EndChild();
++        ImGui::PopStyleVar(3);
+         DrawFooter(em);
      }
+     ImGui::End();
+@@ -908,48 +979,116 @@ void DrawPanel() {
+     ImGui::PopStyleColor(int(std::size(kPanelColors)));
+ }
+ 
++// the window's display's refresh rate, 0 when unreadable
++uint32_t RefreshRate() {
++    SDL_Window* w = static_cast<SDL_Window*>(Window());
++    const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(w ? SDL_GetDisplayForWindow(w) : SDL_GetPrimaryDisplay());
++    return m && m->refresh_rate > 1 ? uint32_t(std::lround(m->refresh_rate)) : 0;
++}
++
++// as app::Pace, at this cap
++void PaceAt(uint32_t cap) {
++    using clock = std::chrono::steady_clock;
++    static clock::time_point next = clock::now();
++    auto now = clock::now();
++    if (!cap) {
++        next = now;
++        return;
++    }
++    auto period = std::chrono::nanoseconds(1000000000ull / cap);
++    next += period;
++    if (next < now - period) next = now;
++    while (clock::now() + std::chrono::milliseconds(2) < next) std::this_thread::sleep_for(std::chrono::milliseconds(1));
++    while (clock::now() < next) std::this_thread::yield();
++}
++
+ }  // namespace
+ 
++void PaceFrame() {
++    if (Get().fps_cap != kFpsCapRefresh) {
++        Pace();
++        return;
++    }
++    // a few under, so a variable refresh display stays in its range and vsync never waits a whole refresh
++    constexpr uint32_t kRefreshMargin = 3;
++    uint32_t rate = RefreshRate();
++    PaceAt(rate > kRefreshMargin ? rate - kRefreshMargin : 0);
++}
++
+ const rows::Row* rows::Page(int page, size_t* count) {
+     if (page == kKeyboardPage) {
+         *count = InputRows().size();
+         return InputRows().data();
+     }
+-    if (page == kControllerPage) {
+-        *count = std::size(kControllerRows);
+-        return kControllerRows;
 +    if (page == kCheatsPage) {
 +        *count = std::size(kCheatRows);
 +        return kCheatRows;
+     }
+-    static const std::vector<Row> rows = [] {
+-        std::vector<Row> out(std::begin(kSettingsRows), std::end(kSettingsRows));
+-        if (!game::HasLanguages()) std::erase_if(out, [](const Row& row) { return row.id == kLanguage; });
+-        return out;
+-    }();
+-    *count = rows.size();
+-    return rows.data();
++    if (page == kCreditsPage) {
++        *count = CreditRows().size();
++        return CreditRows().data();
 +    }
-     static const std::vector<Row> rows = [] {
-         std::vector<Row> out(std::begin(kSettingsRows), std::end(kSettingsRows));
-         if (!game::HasLanguages()) std::erase_if(out, [](const Row& row) { return row.id == kLanguage; });
++    if (page == kTouchPage) {
++        *count = std::size(kTouchRows);
++        return kTouchRows;
++    }
++    if (page == kGeneralPage) {
++        *count = std::size(kGeneralRows);
++        return kGeneralRows;
++    }
++    *count = std::size(kGraphicsRows);
++    return kGraphicsRows;
++}
++
++const rows::Row* rows::Controller(size_t* count) {
++    *count = std::size(kControllerRows);
++    return kControllerRows;
+ }
+ 
+ std::string rows::Value(const Row& row, int step) {
+-    return row.kind == Kind::Bind ? KeyText(input::Binding(size_t(row.id))) : RowText(row.id, step);
++    if (row.kind == Kind::Bind) return KeyText(input::Binding(size_t(row.id)));
++    if (row.id == kCredit) {
++        // a step on a link opens it
++        const Credit* c = CreditOf(row);
++        if (!c || !c->value) return " ";
++        if (step && c->url) SDL_OpenURL(c->url);
++        return c->value;
++    }
++    return RowText(row.id, step);
+ }
+ 
+ void rows::Defaults(int page) { RestoreDefaults(page); }
+ 
+-bool rows::Enabled(const Row& row) { return row.kind != Kind::Value || !Greyed(row.id); }
++// the recomp's own pages share one set of defaults, too much to undo from one of them
++bool rows::Restorable(int page) { return page == kKeyboardPage || page == kCheatsPage; }
++
++// the dynamic resolution's rows while it is on, RENDER RESOLUTION while it is off
++bool rows::Enabled(const Row& row) {
++    if (row.kind != Kind::Value) return true;
++    bool dynamic = game::Opt().dynamic_resolution;
++    switch (row.id) {
++        case kRenderResolution: return !dynamic;
++        case kDynamicTarget:
++        case kDynamicMin:
++        case kDynamicMax:
++        case kDynamicHold: return dynamic;
++        default: return true;
++    }
++}
++
++bool rows::Opens(const Row& row) {
++    // the credits' rows have no arrows: the links open, the rest do nothing
++    return row.kind == Kind::Value && (row.id == kTouchEdit || row.id == kCheckUpdates || row.id == kCredit);
++}
+ 
+ bool MenuOpen() { return g_open.load(std::memory_order_relaxed); }
+ 
+ bool Capturing() { return g_capture >= 0; }
+ 
+-void ToggleTextureReplacement() {
+-    Get().custom_textures = !Get().custom_textures;
+-    Changed(false);
+-}
+-
+ void ToggleMenu() {
+     bool open = !MenuOpen();
+     g_open.store(open, std::memory_order_relaxed);
+     g_capture = -1;
+-    g_display_held = false;
+     if (open) input::ReleaseCursor();
+ }
+ 
 diff --git a/src/common/options.h b/src/common/options.h
-index d2a9adb..5e8f4c8 100644
+index d2a9adb..c8ebcb6 100644
 --- a/src/common/options.h
 +++ b/src/common/options.h
-@@ -50,6 +50,19 @@ struct Options {
-     float controller_dead_zone = 0.0f;  // 0 the game's own kGameDeadZone
-     uint32_t rumble_intensity = 100;  // percent of the game's vibration
-     gyro::Settings gyro;  // the controller's gyro turns the view, beside the right stick
-+    // cheats (the CHEATS tab of the F10 panel)
-+    bool infinite_ammo = false;  // the player's magazine and reserve never go down
-+    uint32_t rapid_fire = 1;  // times the player's rate of fire, 1 the game's
-+    bool no_recoil = false;  // the player's shots do not kick the view
-+    uint32_t game_speed = 100;  // percent of the game's speed, menus and films keep theirs
-+    bool god_mode = false;  // no hit takes the player's health
-+    bool one_hit_kill = false;  // any hit of the player's bullets kills
-+    bool infinite_grenades = false;  // throwing a grenade keeps the count
-+    bool unlock_levels = false;  // every mission open on every difficulty, the save is left as it is
-+    bool unlock_black_ops = false;  // Black Ops open on the missions open on another difficulty, the same
-+    bool esp = false;  // a line from the bottom of the screen and a box to each living enemy
+@@ -4,66 +4,76 @@
+ #include <map>
+ #include <string>
+ 
+-#include "common/gyro.h"
+-
+ // the game's own settings, in the settings file through app::kGame.options
+ namespace game {
+ 
+-// the languages, saved by these codes: English, French, German, Italian, Spanish
+-inline constexpr const char* kLanguages[] = {"int", "fra", "deu", "ita", "esp"};
+-
+-inline constexpr float kGameDeadZone = 0.2f;  // each stick axis: pad+0xCC, set at 0xC2857
+-inline constexpr bool kCustomTexturesDefault = false;  // texture replacement, on in the SDK's settings
++// the languages, saved by these codes: English, French, German, Italian, Spanish, Indonesian. Indonesian is the
++// recomp's own text only: the game files have none, so the game itself stays in English
++inline constexpr const char* kLanguages[] = {"int", "fra", "deu", "ita", "esp", "ind"};
+ 
+ struct Options {
+-    std::string monitor;  // its device name, \\.\DISPLAY2; empty the primary
+     bool skip_intros = false;  // logos at boot and the film after pressing start
+     bool fps_counter = false;
+     uint32_t fmv_scale = 0;  // 4:3 films on a wider screen: 0 fill it, top and bottom cut; 1 kept 4:3
+-    uint32_t colour_blind = 0;  // 0 off, 1 protanopia, 2 deuteranopia, 3 tritanopia
+-    bool hdr_output = true;  // HDR10 on a display with Windows HDR on
++    // a look over the frame: 0 none, 1 and 2 a CRT (light, strong), 3 sharpen, 4 vibrant, 5 noir, 6 sepia,
++    // 7 night vision, 8 VHS
++    uint32_t screen_filter = 0;
+     bool reload_blur = true;
+-    uint32_t ambient_occlusion = 0;  // screen space, from the scene's depth: 0 off, 1 SSAO, 2 GTAO
+-    uint32_t msaa = 0;  // samples a pixel of the scene, 0 off
++    bool bloom = true;  // the glow added over bright parts of the frame (native/vulkan.cpp)
++    bool fog = true;
++    uint32_t anti_aliasing = 0;  // 0 off, 1 FXAA as the frame goes onto the screen, 2 SSAA: twice the resolution
++    bool hdr = false;  // a tone map that brings back the colours the console's overbright look burns out
+     uint32_t draw_distance = 1;  // times the game's LOD and draw distances
+-    float mouse_sensitivity = 1.0f;  // horizontal
+-    float mouse_vertical_sensitivity = 1.0f;
+-    float aim_horizontal_sensitivity = 1.0f;  // times the mouse's while the view is zoomed in: aiming and scopes
+-    float aim_vertical_sensitivity = 1.0f;
+-    bool invert_mouse = false;  // the Y axis
+-    bool invert_mouse_x = false;
++    // the render resolution follows the frame rate (native/dynamic_resolution.cpp): down when it falls under the
++    // target, up again once it holds the target this many seconds; within min and max, percent of the screen's
++    bool dynamic_resolution = false;
++    uint32_t dynamic_target_fps = 60;
++    uint32_t dynamic_min_percent = 40;
++    uint32_t dynamic_max_percent = 100;
++    uint32_t dynamic_hold = 5;
++    float mouse_sensitivity = 1.0f;
++    float touch_sensitivity = 1.0f;  // the touch screen's look, apart from the mouse's
++    bool invert_mouse = false;
+     bool hold_aim = true;  // scopes too, keyboard and mouse
+     uint32_t fov = 70;  // horizontal degrees on a 4:3 frame, 70 is the game's
+     uint32_t viewmodel_fov = 70;  // the gun and arms, the same measure
+     uint32_t walk_speed = 50;  // percent of running, while the walk key is held
++    // a controller's sticks: the radial dead zone as percent of the travel, 0 the game's own, and what the travel
++    // past it is scaled by; the left stick moves, the right looks
++    uint32_t left_deadzone = 0;
++    uint32_t right_deadzone = 0;
++    float left_sensitivity = 1.0f;
++    float right_sensitivity = 1.0f;
+     uint32_t audio_output = 0;  // audio::kOutputAuto, kOutputStereo, kOutputSurround or kOutputMono
+-    std::string language = "auto";  // "auto" (the Windows display language) or one of kLanguages
+-    bool smaa = false;  // over the finished frame, HUD included; combines with msaa
+-    bool pause_on_focus_loss = true;  // the game and its sound stop while the window is in the background
+-    bool aim_assist = true;  // the game's pull to targets on a controller, never on the keyboard and mouse
+-    bool controller_hold_aim = false;  // scopes too; off is the game's own, held to aim and scopes toggled
+-    float controller_sensitivity = 1.0f;  // horizontal, times the game's right stick look speeds
+-    float controller_vertical_sensitivity = 1.0f;
+-    float controller_aim_horizontal_sensitivity = 1.0f;  // times the stick's while the view is zoomed in
+-    float controller_aim_vertical_sensitivity = 1.0f;
+-    bool invert_controller_x = false;  // the Y axis is the game's own invert look
+-    float controller_dead_zone = 0.0f;  // 0 the game's own kGameDeadZone
+-    uint32_t rumble_intensity = 100;  // percent of the game's vibration
+-    gyro::Settings gyro;  // the controller's gyro turns the view, beside the right stick
+-    bool menu_animations = true;  // off: menu pages and the pause menu change without sliding in and out
++    std::string language = "int";  // one of kLanguages
++    bool infinite_ammo = false;  // cheat: the player's magazine and reserve never go down
++    uint32_t marker_kind = 0;  // developer: draw a marker on every entity of this type, 0 none (not saved)
++    uint32_t rapid_fire = 1;  // cheat: times the player's rate of fire, 1 the game's
++    bool no_recoil = false;  // cheat: the player's shots do not kick the view
++    uint32_t game_speed = 100;  // cheat: percent of the game's speed, menus and films keep theirs
++    bool god_mode = false;  // cheat: no hit takes the player's health
++    bool one_hit_kill = false;  // cheat: any hit of the player's bullets kills
++    bool infinite_grenades = false;  // cheat: throwing a grenade keeps the count
++    bool unlock_levels = false;  // cheat: every mission open on every difficulty, the save is left as it is
++    bool unlock_black_ops = false;  // cheat: Black Ops open on the missions open on another difficulty, the same
++    bool esp = false;  // cheat: a line from the bottom of the screen and a box to each living enemy
 +    bool blood = false;  // a hit on an enemy sprays blood (the game has none)
-+    bool aimbot = false;  // aiming in turns the view to the body of the enemy nearest the crosshair
-     bool menu_animations = true;  // off: menu pages and the pause menu change without sliding in and out
++    bool aimbot = false;  // cheat: aiming in turns the view to the body of the enemy nearest the crosshair
      std::map<std::string, std::string> keys;  // action id to key names, absent is the default
  };
+ Options& Opt();
+-// one of kLanguages for a language setting: "auto" is the Windows display language, English when the game lacks it
+-std::string ResolveLanguage(const std::string& setting);
+-// the language setting as this run started, resolved: the language the game boots in
++// the language setting as this run started, the language the game boots in
+ const std::string& BootLanguage();
+ bool HasLanguages();  // language.cpp
++bool LanguageAvailable(const std::string& code);  // language.cpp: the LANGUAGE row offers it
+ inline std::atomic<float> g_fps{0};  // from the host, for the game's own counter
+-inline std::atomic<bool> g_hdr_display{false};  // the window's display has Windows HDR on, from the renderer
+ inline std::atomic<bool> g_hide_hud{false};  // the toggle HUD key: the gameplay HUD is not drawn
+-inline std::atomic<bool> g_focus_paused{false};  // the game thread waits for the window's focus
++// the view's zoom as the look update scales the turn by (src/game/mouse.cpp): 1 none, about 0.74 a rifle's sights,
++// a scope's levels under that (a half at X2, a quarter at X5)
++inline std::atomic<float> g_zoom{1.0f};
++inline std::atomic<bool> g_focus_paused{false};  // the game thread waits while the app is in the background
+ inline std::atomic<uint32_t> g_focus_pauses{0};  // focus pauses ended so far
+-void WaitWhileUnfocused();  // focus_pause.cpp: game thread, before the present
++void WaitWhileUnfocused();  // native/game_host.cpp: game thread, before the present
++bool HudShown();  // src/game/hud.cpp: the player's HUD drew lately, a hint's pause too
+ 
+ }  // namespace game
 diff --git a/src/game/cheats.cpp b/src/game/cheats.cpp
 new file mode 100644
 index 0000000..1ec0966
@@ -575,10 +1722,10 @@ index 0000000..6c68054
 +}
 diff --git a/src/game/esp.cpp b/src/game/esp.cpp
 new file mode 100644
-index 0000000..8b737f6
+index 0000000..9b3e4db
 --- /dev/null
 +++ b/src/game/esp.cpp
-@@ -0,0 +1,427 @@
+@@ -0,0 +1,481 @@
 +// The cheats page's ESP LINES: each living enemy gets a box round it and a line to it from the bottom of the screen,
 +// drawn over the finished frame with the view the scene was drawn with. AIMBOT: while the player aims in the view
 +// turns to the body of the living enemy nearest the crosshair
@@ -586,6 +1733,7 @@ index 0000000..8b737f6
 +#include <chrono>
 +#include <cmath>
 +#include <cstring>
++#include <vector>
 +
 +#include "common/options.h"
 +#include "game/layout.h"
@@ -983,11 +2131,64 @@ index 0000000..8b737f6
 +    ctx.ecx = ecx;
 +}
 +
++// the entities of one type, found by scanning the pool the game keeps them in (0x40 aligned, the position at +A0 and the
++// type at +C4), marked with a cross and a line up so the person can tell which type is the items
++static void DrawMarkers(X86Context& ctx, float unit) {
++    static std::vector<uint32_t> found;
++    static std::chrono::steady_clock::time_point scanned;
++    static uint32_t scanned_kind = ~0u;
++    uint32_t want = Opt().marker_kind;
++    auto now = std::chrono::steady_clock::now();
++    if (want != scanned_kind || now - scanned > std::chrono::milliseconds(500)) {
++        scanned = now, scanned_kind = want;
++        found.clear();
++        for (uint32_t at = 0x81500000; at < 0x81800000 && found.size() < 300; at += 0x40) {
++            if (!mem::IsCommitted(at) || !mem::IsCommitted(at + 0xD0)) continue;
++            if (R32(at + kCharKind) != want) continue;
++            float f[3] = {G<float>(at + kCharPosition), G<float>(at + kCharPosition + 4), G<float>(at + kCharPosition + 8)};
++            if (!std::isfinite(f[0]) || !std::isfinite(f[1]) || !std::isfinite(f[2])) continue;
++            if (std::fabs(f[0]) > 3000 || std::fabs(f[1]) > 3000 || std::fabs(f[2]) > 3000) continue;
++            if (std::fabs(f[0]) + std::fabs(f[1]) + std::fabs(f[2]) < 0.5f) continue;
++            found.push_back(at);
++        }
++    }
++    uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
++    float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
++    float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
++    static const uint32_t buffer = mem::AllocSystem(kBloodVertices * sizeof(Vertex), 16);
++    static const uint32_t offset = mem::AllocSystem(8, 16);
++    static const uint32_t colours = mem::AllocSystem(kBloodVertices * 4 * sizeof(float), 16);
++    static const float yellow[4] = {1.0f, 0.9f, 0.1f, 1.0f};
++    BloodOut o;
++    o.first = o.v = static_cast<Vertex*>(HostPtr(buffer));
++    o.end = o.first + kBloodVertices;
++    o.colour = static_cast<float*>(HostPtr(colours));
++    float width = 2.0f * unit, arm = 8.0f * unit;
++    for (uint32_t at : found) {
++        float pos[3] = {G<float>(at + kCharPosition), G<float>(at + kCharPosition + 4), G<float>(at + kCharPosition + 8)};
++        float top[3] = {pos[0], pos[1] + 1.5f, pos[2]}, a[2], b[2];
++        if (!Project(pos, vx, vy, vw, vh, a) || !Project(top, vx, vy, vw, vh, b)) continue;
++        BloodQuad(o, a[0], a[1], b[0], b[1], width, yellow);
++        BloodQuad(o, b[0] - arm, b[1] - arm, b[0] + arm, b[1] + arm, width, yellow);
++        BloodQuad(o, b[0] - arm, b[1] + arm, b[0] + arm, b[1] - arm, width, yellow);
++    }
++    if (o.v == o.first) return;
++    W32(offset, 0);
++    W32(offset + 4, 0);
++    uint32_t eax = ctx.eax, ecx = ctx.ecx;
++    ctx.eax = uint32_t(o.v - o.first) / 3;
++    ctx.ecx = buffer;
++    CallGuest(ctx, kTriangles, {offset, colours});
++    ctx.eax = eax;
++    ctx.ecx = ecx;
++}
++
 +// the ESP's lines and the blood, between the 2D layer's begin and end
 +void DrawEsp(X86Context& ctx, float unit) {
 +    if (!g_camera || !R32(kWorld)) return;
 +    if (Opt().esp) DrawLines(ctx, unit);
 +    if (Opt().blood) DrawBlood(ctx, unit);
++    if (Opt().marker_kind) DrawMarkers(ctx, unit);
 +}
 +
 +}  // namespace game
@@ -1007,10 +2208,16 @@ index 0000000..8b737f6
 +    __imp__sub_001DFD90(ctx, base);
 +}
 diff --git a/src/game/fps_counter.cpp b/src/game/fps_counter.cpp
-index a8369a1..98a4c44 100644
+index a8369a1..181d7f2 100644
 --- a/src/game/fps_counter.cpp
 +++ b/src/game/fps_counter.cpp
-@@ -19,6 +19,10 @@ using flash::kClipNext;
+@@ -1,4 +1,5 @@
+ // Frame rate (top left) and the main menu watermark, drawn by the game in its small font over the finished frame.
++#include <strings.h>
+ #include <algorithm>
+ #include <bit>
+ #include <cstdio>
+@@ -19,6 +20,10 @@ using flash::kClipNext;
  using flash::kClipX;
  using flash::kClipY;
  
@@ -1021,12 +2228,38 @@ index a8369a1..98a4c44 100644
  namespace {
  
  // the game's 2D layer: Text(font, wide text, x, y, size, rgba floats), viewport pixels from the top left
-@@ -135,13 +139,15 @@ void DrawOverlay(X86Context& ctx, uint8_t*) {
+@@ -37,7 +42,7 @@ constexpr float kMargin = 8;
+ constexpr float kGrey = 186 / 255.0f;  // the HUD's text
+ 
+ // as SCDA: at rest it ends 80 in from the right, on the row of the menu's button legend
+-constexpr char kWatermark[] = "XBE Recomp V2";
++constexpr char kWatermark[] = "Black Android";
+ constexpr float kWatermarkRight = 80;
+ constexpr float kWatermarkTop = 427;
+ // the page's Main slides its legend in from the right and back out; x is the confirm prompt's at rest (frame 29)
+@@ -90,14 +95,14 @@ const TitlePage* CurrentTitlePage() {
+     if (!ui) return nullptr;
+     const char* name = static_cast<const char*>(HostPtr(ui + kPageName));
+     for (const TitlePage& page : kTitlePages)
+-        if (_strnicmp(name, page.name, std::strlen(page.name)) == 0) return &page;
++        if (strncasecmp(name, page.name, std::strlen(page.name)) == 0) return &page;
+     return nullptr;
+ }
+ 
+ uint32_t Child(uint32_t clip, const char* name) {
+     int left = 4096;
+     for (uint32_t child = flash::FirstChild(clip); child && left; child = R32(child + kClipNext), left--)
+-        if (flash::IsClip(child) && _stricmp(flash::Name(child), name) == 0) return child;
++        if (flash::IsClip(child) && strcasecmp(flash::Name(child), name) == 0) return child;
+     return 0;
+ }
+ 
+@@ -135,13 +140,15 @@ void DrawOverlay(X86Context& ctx, uint8_t*) {
      const TitlePage* title = CurrentTitlePage();
      std::optional<float> slide = title ? LegendSlide(*title) : std::nullopt;
      bool watermark = slide.has_value();
 -    if (!(fps || watermark) || !font || !(h > 0)) return;
-+    bool esp = game::Opt().esp || game::Opt().blood;
++    bool esp = game::Opt().esp || game::Opt().blood || game::Opt().marker_kind;
 +    if (!(fps || watermark || esp) || !font || !(h > 0)) return;
      View view{h / 480, w / h / game::Aspect()};
      float& width = G<float>(font + kFontScale);

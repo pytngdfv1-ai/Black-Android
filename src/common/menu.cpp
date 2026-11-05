@@ -252,7 +252,7 @@ enum RowId { kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlu
              kCheckUpdates, kTouchSensitivity, kLeftDeadzone, kRightDeadzone, kLeftSensitivity, kRightSensitivity,
              kScreenFilter, kGyroInvertX, kGyroInvertY, kUnlockLevels, kUnlockBlackOps, kTouchSkin, kCredit, kBloom,
              kFog, kAntiAliasing, kHdr, kEsp, kAimbot, kTouchStick, kDynamicRes, kDynamicTarget, kDynamicMin,
-             kDynamicMax, kDynamicHold, kLogObjects, kBlood };
+             kDynamicMax, kDynamicHold, kLogObjects, kBlood, kMarkerKind };
 
 using rows::Kind;
 using rows::Row;
@@ -336,6 +336,7 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kUnlockBlackOps, "UNLOCK BLACK OPS"},
     {Kind::Heading, -1, "DEVELOPER"},
     {Kind::Value, kLogObjects, "LOG OBJECTS TO THE LOG FILE"},
+    {Kind::Value, kMarkerKind, "MARK ENTITY TYPE (FIND ITEMS)"},
 };
 
 // the title menu's CREDITS page: who and what, and the links, which open in the browser. Its rows take no step; a
@@ -519,6 +520,11 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
         case kLogObjects:
             if (step) game::DumpObjects();  // objects.cpp: the level's objects, by class, into the log
             std::snprintf(text, sizeof(text), "PRESS");
+            return true;
+        case kMarkerKind:
+            if (step) o.marker_kind = uint32_t(StepRange(int(o.marker_kind), 0, 60, 1, step));
+            if (!o.marker_kind) std::snprintf(text, sizeof(text), "OFF");
+            else std::snprintf(text, sizeof(text), "TYPE %u", o.marker_kind);
             return true;
         case kRapidFire:
             // off, then 2 to 4 times the rate
