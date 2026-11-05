@@ -122,6 +122,7 @@ const app::GameInfo app::kGame = {
                 {"unlock_levels", &game::Opt().unlock_levels, nullptr},
                 {"unlock_black_ops", &game::Opt().unlock_black_ops, nullptr},
                 {"esp", &game::Opt().esp, nullptr},
+                {"blood", &game::Opt().blood, nullptr},
                 {"aimbot", &game::Opt().aimbot, nullptr}},
     .load = game::Load,
     .save = game::Save,

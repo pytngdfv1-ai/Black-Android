@@ -9,6 +9,10 @@
 using namespace kernel;
 using namespace layout;
 
+namespace game {
+void BloodSpurt(uint32_t victim);  // esp.cpp
+}
+
 namespace {
 
 // character: the player is the one in the world container, its kind 2
@@ -81,9 +85,15 @@ X86_FUNC(sub_001E5FA0) {
 // characters' class, the player's has its own
 X86_EXTERN_FUNC(__imp__sub_001E74B0);
 X86_FUNC(sub_001E74B0) {
-    Doomed doomed = Doom(ctx.ecx, R32(ctx.esp + 0x18));
+    uint32_t victim = ctx.ecx;
+    float health = G<float>(victim + kCharHealth);
+    bool dying = R32(victim + kCharDying) != 0;
+    Doomed doomed = Doom(victim, R32(ctx.esp + 0x18));
     __imp__sub_001E74B0(ctx, base);
     Spare(doomed);
+    // the blood cheat: the bullet took health or killed
+    bool hurt = G<float>(victim + kCharHealth) < health || (!dying && R32(victim + kCharDying));
+    if (hurt && victim != Player()) game::BloodSpurt(victim);
 }
 
 // A character's animation event (64-bit hash, then a pointer to the character): the throw takes a grenade

@@ -1,5 +1,5 @@
 diff --git a/src/common/game_info.cpp b/src/common/game_info.cpp
-index 3cc2bad..d10ae89 100644
+index 3cc2bad..b854d1e 100644
 --- a/src/common/game_info.cpp
 +++ b/src/common/game_info.cpp
 @@ -35,6 +35,23 @@ HCURSOR WindowCursor() {
@@ -53,7 +53,7 @@ index 3cc2bad..d10ae89 100644
          case WM_KEYDOWN:
          case WM_SYSKEYDOWN:
              if (!(lp & kKeyWasDown) && input::PanelKey(int(wp))) {
-@@ -275,7 +312,18 @@ const app::GameInfo app::kGame = {
+@@ -275,7 +312,19 @@ const app::GameInfo app::kGame = {
                  {"gyro_button", nullptr, &game::Opt().gyro.button},
                  {"gyro_button_mode", nullptr, &game::Opt().gyro.button_mode},
                  {"gyro_recenter_button", nullptr, &game::Opt().gyro.recenter_button},
@@ -69,12 +69,13 @@ index 3cc2bad..d10ae89 100644
 +                {"unlock_levels", &game::Opt().unlock_levels, nullptr},
 +                {"unlock_black_ops", &game::Opt().unlock_black_ops, nullptr},
 +                {"esp", &game::Opt().esp, nullptr},
++                {"blood", &game::Opt().blood, nullptr},
 +                {"aimbot", &game::Opt().aimbot, nullptr}},
      .load = game::Load,
      .save = game::Save,
      .init = game::Init,
 diff --git a/src/common/menu.cpp b/src/common/menu.cpp
-index f18e05a..b3091b7 100644
+index f18e05a..234654a 100644
 --- a/src/common/menu.cpp
 +++ b/src/common/menu.cpp
 @@ -30,6 +30,11 @@
@@ -96,11 +97,11 @@ index f18e05a..b3091b7 100644
 -             kTextureDumping, kDumpFormat, kDeadZone };
 +             kTextureDumping, kDumpFormat, kDeadZone,
 +             kInfiniteAmmo, kInfiniteGrenades, kRapidFire, kNoRecoil, kGodMode, kOneHitKill, kEsp, kAimbot,
-+             kGameSpeed, kUnlockLevels, kUnlockBlackOps, kLogObjects };
++             kGameSpeed, kUnlockLevels, kUnlockBlackOps, kLogObjects, kBlood };
  
  using rows::Kind;
  using rows::Row;
-@@ -318,6 +325,26 @@ constexpr Row kControllerRows[] = {
+@@ -318,6 +325,27 @@ constexpr Row kControllerRows[] = {
      {Kind::Value, kGyroCalibrate, "CALIBRATE GYRO"},
  };
  
@@ -115,6 +116,7 @@ index f18e05a..b3091b7 100644
 +    {Kind::Value, kGodMode, "GOD MODE"},
 +    {Kind::Value, kOneHitKill, "ONE-HIT KILL"},
 +    {Kind::Value, kEsp, "ESP LINES"},
++    {Kind::Value, kBlood, "BLOOD"},
 +    {Kind::Value, kAimbot, "AIMBOT (WHILE AIMING IN)"},  // esp.cpp turns the view only at a zoom above 1
 +    {Kind::Heading, -1, "GAME"},
 +    {Kind::Value, kGameSpeed, "GAME SPEED"},
@@ -127,7 +129,7 @@ index f18e05a..b3091b7 100644
  // the setting an ON / OFF row flips, nullptr for any other row
  bool* ToggleFlag(Settings& s, int id) {
      game::Options& o = game::Opt();
-@@ -339,6 +366,15 @@ bool* ToggleFlag(Settings& s, int id) {
+@@ -339,6 +367,16 @@ bool* ToggleFlag(Settings& s, int id) {
          case kControllerHoldAim: return &o.controller_hold_aim;
          case kGyroAiming: return &o.gyro.enabled;
          case kAimAssist: return &o.aim_assist;
@@ -139,11 +141,12 @@ index f18e05a..b3091b7 100644
 +        case kUnlockLevels: return &o.unlock_levels;
 +        case kUnlockBlackOps: return &o.unlock_black_ops;
 +        case kEsp: return &o.esp;
++        case kBlood: return &o.blood;
 +        case kAimbot: return &o.aimbot;
          default: return nullptr;
      }
  }
-@@ -505,6 +541,30 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
+@@ -505,6 +543,30 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
      }
  }
  
@@ -174,7 +177,7 @@ index f18e05a..b3091b7 100644
  // both sensitivity rows: 0.1 to 5.0 in steps of 0.1
  void StepSensitivity(float& value, int step, char (&text)[64]) {
      if (step) {
-@@ -611,7 +671,8 @@ std::string RowText(int id, int step, Settings& s = Get()) {
+@@ -611,7 +673,8 @@ std::string RowText(int id, int step, Settings& s = Get()) {
      if (bool* on = ToggleFlag(s, id)) {
          Flip(*on, step);
          std::snprintf(text, sizeof(text), "%s", OnOff(*on));
@@ -184,7 +187,7 @@ index f18e05a..b3091b7 100644
          StepInputRow(id, step, text);
      }
      if (step && &s == &Get()) Changed(DisplayRow(id));
-@@ -626,10 +687,11 @@ std::string KeyText(std::string keys) {
+@@ -626,10 +689,11 @@ std::string KeyText(std::string keys) {
      return keys;
  }
  
@@ -197,7 +200,7 @@ index f18e05a..b3091b7 100644
  
  // the MOUSE AND KEYBOARD page's values, its binds aside
  void CopyKeyboardValues(game::Options& to, const game::Options& from) {
-@@ -656,8 +718,27 @@ void CopyControllerValues(game::Options& to, const game::Options& from) {
+@@ -656,8 +720,28 @@ void CopyControllerValues(game::Options& to, const game::Options& from) {
      to.gyro = from.gyro;
  }
  
@@ -212,6 +215,7 @@ index f18e05a..b3091b7 100644
 +    to.unlock_levels = from.unlock_levels;
 +    to.unlock_black_ops = from.unlock_black_ops;
 +    to.esp = from.esp;
++    to.blood = from.blood;
 +    to.aimbot = from.aimbot;
 +}
 +
@@ -225,7 +229,7 @@ index f18e05a..b3091b7 100644
      if (page == kControllerPage) {
          CopyControllerValues(o, game::Options{});
          Save();
-@@ -674,6 +755,7 @@ void RestoreDefaults(int page) {
+@@ -674,6 +758,7 @@ void RestoreDefaults(int page) {
      o = game::Options{};
      CopyKeyboardValues(o, keep);
      CopyControllerValues(o, keep);
@@ -233,7 +237,7 @@ index f18e05a..b3091b7 100644
      o.keys = keep.keys;
      Changed(true);
  }
-@@ -804,6 +886,39 @@ void KeyRow(const Row& r) {
+@@ -804,6 +889,39 @@ void KeyRow(const Row& r) {
      g_capture_armed = false;
  }
  
@@ -273,7 +277,7 @@ index f18e05a..b3091b7 100644
  void DrawRows(int page) {
      size_t count = 0;
      const Row* list = rows::Page(page, &count);
-@@ -813,6 +928,7 @@ void DrawRows(int page) {
+@@ -813,6 +931,7 @@ void DrawRows(int page) {
          else if (r.kind == Kind::Value) ValueRow(r);
          else KeyRow(r);
      }
@@ -281,7 +285,7 @@ index f18e05a..b3091b7 100644
  }
  
  void Defaults() {
-@@ -867,6 +983,7 @@ void DrawFooter(float em) {
+@@ -867,6 +986,7 @@ void DrawFooter(float em) {
      const char* hint = "";
      if (g_capture >= 0) hint = "Press a key or mouse button to bind, Escape cancels";
      else if (g_page == kKeyboardPage && g_hovered_box >= 0) hint = "Right click or Delete clears the key";
@@ -289,7 +293,7 @@ index f18e05a..b3091b7 100644
      ImGui::TextUnformatted(Ui(hint, false).c_str());
      ImGui::PopStyleColor();
      float bw = em * 8;
-@@ -885,7 +1002,9 @@ void DrawPanel() {
+@@ -885,7 +1005,9 @@ void DrawPanel() {
      const ImGuiViewport* vp = ImGui::GetMainViewport();
      float em = ImGui::GetFontSize();
      ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -300,7 +304,7 @@ index f18e05a..b3091b7 100644
      for (const auto& [col, color] : kPanelColors) ImGui::PushStyleColor(col, color);
      ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
      ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-@@ -919,6 +1038,10 @@ const rows::Row* rows::Page(int page, size_t* count) {
+@@ -919,6 +1041,10 @@ const rows::Row* rows::Page(int page, size_t* count) {
          *count = std::size(kControllerRows);
          return kControllerRows;
      }
@@ -312,10 +316,10 @@ index f18e05a..b3091b7 100644
          std::vector<Row> out(std::begin(kSettingsRows), std::end(kSettingsRows));
          if (!game::HasLanguages()) std::erase_if(out, [](const Row& row) { return row.id == kLanguage; });
 diff --git a/src/common/options.h b/src/common/options.h
-index d2a9adb..af5d397 100644
+index d2a9adb..5e8f4c8 100644
 --- a/src/common/options.h
 +++ b/src/common/options.h
-@@ -50,6 +50,18 @@ struct Options {
+@@ -50,6 +50,19 @@ struct Options {
      float controller_dead_zone = 0.0f;  // 0 the game's own kGameDeadZone
      uint32_t rumble_intensity = 100;  // percent of the game's vibration
      gyro::Settings gyro;  // the controller's gyro turns the view, beside the right stick
@@ -330,16 +334,17 @@ index d2a9adb..af5d397 100644
 +    bool unlock_levels = false;  // every mission open on every difficulty, the save is left as it is
 +    bool unlock_black_ops = false;  // Black Ops open on the missions open on another difficulty, the same
 +    bool esp = false;  // a line from the bottom of the screen and a box to each living enemy
++    bool blood = false;  // a hit on an enemy sprays blood (the game has none)
 +    bool aimbot = false;  // aiming in turns the view to the body of the enemy nearest the crosshair
      bool menu_animations = true;  // off: menu pages and the pause menu change without sliding in and out
      std::map<std::string, std::string> keys;  // action id to key names, absent is the default
  };
 diff --git a/src/game/cheats.cpp b/src/game/cheats.cpp
 new file mode 100644
-index 0000000..57ff76f
+index 0000000..1ec0966
 --- /dev/null
 +++ b/src/game/cheats.cpp
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,109 @@
 +// The cheats page's god mode, one-hit kill and infinite grenades. The rest live where the game
 +// already has a hook: infinite ammo, rapid fire and no recoil with the weapon's, game speed with the frame time
 +#include <algorithm>
@@ -350,6 +355,10 @@ index 0000000..57ff76f
 +
 +using namespace kernel;
 +using namespace layout;
++
++namespace game {
++void BloodSpurt(uint32_t victim);  // esp.cpp
++}
 +
 +namespace {
 +
@@ -423,9 +432,15 @@ index 0000000..57ff76f
 +// characters' class, the player's has its own
 +X86_EXTERN_FUNC(__imp__sub_001E74B0);
 +X86_FUNC(sub_001E74B0) {
-+    Doomed doomed = Doom(ctx.ecx, R32(ctx.esp + 0x18));
++    uint32_t victim = ctx.ecx;
++    float health = G<float>(victim + kCharHealth);
++    bool dying = R32(victim + kCharDying) != 0;
++    Doomed doomed = Doom(victim, R32(ctx.esp + 0x18));
 +    __imp__sub_001E74B0(ctx, base);
 +    Spare(doomed);
++    // the blood cheat: the bullet took health or killed
++    bool hurt = G<float>(victim + kCharHealth) < health || (!dying && R32(victim + kCharDying));
++    if (hurt && victim != Player()) game::BloodSpurt(victim);
 +}
 +
 +// A character's animation event (64-bit hash, then a pointer to the character): the throw takes a grenade
@@ -560,10 +575,10 @@ index 0000000..6c68054
 +}
 diff --git a/src/game/esp.cpp b/src/game/esp.cpp
 new file mode 100644
-index 0000000..d934352
+index 0000000..89cb049
 --- /dev/null
 +++ b/src/game/esp.cpp
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,312 @@
 +// The cheats page's ESP LINES: each living enemy gets a box round it and a line to it from the bottom of the screen,
 +// drawn over the finished frame with the view the scene was drawn with. AIMBOT: while the player aims in the view
 +// turns to the body of the living enemy nearest the crosshair
@@ -678,6 +693,30 @@ index 0000000..d934352
 +    return v;
 +}
 +
++// BLOOD: Black has none, so a hit on an enemy sprays red streaks from it. They are drawn in the 2D layer like the ESP,
++// each a drop thrown from the hit that falls under gravity, projected with the scene's view
++constexpr size_t kSpurts = 12;                   // hits shown at once
++constexpr size_t kDrops = 14;                    // streaks a hit
++constexpr size_t kBloodVertices = kSpurts * kDrops * 6;
++constexpr float kBloodLife = 0.7f;               // seconds
++constexpr float kBloodThickness = 2.5f;          // of a 480 frame
++constexpr float kBloodColour[4] = {0.55f, 0.02f, 0.02f, 1.0f};
++
++struct Spurt {
++    bool live = false;
++    float at[3];
++    float away[2];  // along the ground, from the player to the enemy
++    uint32_t seed;
++    std::chrono::steady_clock::time_point when;
++};
++Spurt g_spurts[kSpurts];
++size_t g_next_spurt;
++
++float Random(uint32_t& seed) {
++    seed = seed * 1664525u + 1013904223u;
++    return float(seed >> 8) / float(1 << 24);
++}
++
 +}  // namespace
 +
 +namespace game {
@@ -717,8 +756,7 @@ index 0000000..d934352
 +}
 +
 +// D3DVIEWPORT8: x, y, width, height. Called between the 2D layer's begin and end
-+void DrawEsp(X86Context& ctx, float unit) {
-+    if (!Opt().esp || !g_camera || !R32(kWorld)) return;
++static void DrawLines(X86Context& ctx, float unit) {
 +    uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
 +    float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
 +    float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
@@ -763,6 +801,86 @@ index 0000000..d934352
 +    ctx.ecx = ecx;
 +}
 +
++// a hit on the enemy: the blood starts from its chest
++void BloodSpurt(uint32_t victim) {
++    if (!Opt().blood) return;
++    const float* at = &G<float>(victim + kCharPosition);
++    Spurt& s = g_spurts[g_next_spurt++ % kSpurts];
++    s.at[0] = at[0];
++    s.at[1] = at[1] + kChest;
++    s.at[2] = at[2];
++    s.away[0] = s.away[1] = 0;
++    if (uint32_t me = R32(kWorld) ? R32(kWorld) + kWorldPlayer : 0) {
++        const float* from = &G<float>(me + kCharPosition);
++        float dx = at[0] - from[0], dz = at[2] - from[2];
++        float length = std::sqrt(dx * dx + dz * dz);
++        if (length > 0.01f) s.away[0] = dx / length, s.away[1] = dz / length;
++    }
++    s.when = std::chrono::steady_clock::now();
++    s.seed = uint32_t(s.when.time_since_epoch().count()) ^ victim;
++    s.live = true;
++}
++
++static void DrawBlood(X86Context& ctx, float unit) {
++    uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
++    float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
++    float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
++    static const uint32_t buffer = mem::AllocSystem(kBloodVertices * sizeof(Vertex), 16);
++    static const uint32_t offset = mem::AllocSystem(8, 16);
++    static const uint32_t colours = [] {
++        uint32_t c = mem::AllocSystem(kBloodVertices * sizeof(kBloodColour), 16);
++        for (size_t i = 0; i < kBloodVertices; i++)
++            std::memcpy(HostPtr(c + i * sizeof(kBloodColour)), kBloodColour, sizeof(kBloodColour));
++        return c;
++    }();
++    Vertex* first = static_cast<Vertex*>(HostPtr(buffer));
++    Vertex* v = first;
++    float width = kBloodThickness * unit;
++    auto now = std::chrono::steady_clock::now();
++    for (Spurt& s : g_spurts) {
++        if (!s.live) continue;
++        float age = std::chrono::duration<float>(now - s.when).count();
++        if (age > kBloodLife) {
++            s.live = false;
++            continue;
++        }
++        uint32_t seed = s.seed;
++        for (size_t d = 0; d < kDrops; d++) {
++            float angle = Random(seed) * 6.2831853f;
++            float speed = 1.0f + Random(seed) * 3.0f;
++            float rise = 1.0f + Random(seed) * 3.0f;
++            float vel[3] = {std::cos(angle) * speed + s.away[0] * 2.5f, rise, std::sin(angle) * speed + s.away[1] * 2.5f};
++            auto place = [&](float t, float out[3]) {
++                out[0] = s.at[0] + vel[0] * t;
++                out[1] = s.at[1] + vel[1] * t - 4.9f * t * t;
++                out[2] = s.at[2] + vel[2] * t;
++            };
++            float tail[3], head[3], a[2], b[2];
++            place(std::max(age - 0.05f, 0.0f), tail);
++            place(age, head);
++            if (head[1] < s.at[1] - kChest) continue;  // it hit the ground
++            if (!Project(tail, vx, vy, vw, vh, a) || !Project(head, vx, vy, vw, vh, b)) continue;
++            v = Segment(v, a[0], a[1], b[0], b[1], width);
++        }
++    }
++    if (v == first) return;
++    W32(offset, 0);
++    W32(offset + 4, 0);
++    uint32_t eax = ctx.eax, ecx = ctx.ecx;
++    ctx.eax = uint32_t(v - first) / 3;
++    ctx.ecx = buffer;
++    CallGuest(ctx, kTriangles, {offset, colours});
++    ctx.eax = eax;
++    ctx.ecx = ecx;
++}
++
++// the ESP's lines and the blood, between the 2D layer's begin and end
++void DrawEsp(X86Context& ctx, float unit) {
++    if (!g_camera || !R32(kWorld)) return;
++    if (Opt().esp) DrawLines(ctx, unit);
++    if (Opt().blood) DrawBlood(ctx, unit);
++}
++
 +}  // namespace game
 +
 +// The characters' update, a frame (ecx the character, its class's own; the player's is 0x1E5FA0): the enemies
@@ -774,7 +892,7 @@ index 0000000..d934352
 +    __imp__sub_001DFD90(ctx, base);
 +}
 diff --git a/src/game/fps_counter.cpp b/src/game/fps_counter.cpp
-index a8369a1..861d40a 100644
+index a8369a1..98a4c44 100644
 --- a/src/game/fps_counter.cpp
 +++ b/src/game/fps_counter.cpp
 @@ -19,6 +19,10 @@ using flash::kClipNext;
@@ -793,7 +911,7 @@ index a8369a1..861d40a 100644
      std::optional<float> slide = title ? LegendSlide(*title) : std::nullopt;
      bool watermark = slide.has_value();
 -    if (!(fps || watermark) || !font || !(h > 0)) return;
-+    bool esp = game::Opt().esp;
++    bool esp = game::Opt().esp || game::Opt().blood;
 +    if (!(fps || watermark || esp) || !font || !(h > 0)) return;
      View view{h / 480, w / h / game::Aspect()};
      float& width = G<float>(font + kFontScale);

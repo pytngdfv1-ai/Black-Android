@@ -252,7 +252,7 @@ enum RowId { kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlu
              kCheckUpdates, kTouchSensitivity, kLeftDeadzone, kRightDeadzone, kLeftSensitivity, kRightSensitivity,
              kScreenFilter, kGyroInvertX, kGyroInvertY, kUnlockLevels, kUnlockBlackOps, kTouchSkin, kCredit, kBloom,
              kFog, kAntiAliasing, kHdr, kEsp, kAimbot, kTouchStick, kDynamicRes, kDynamicTarget, kDynamicMin,
-             kDynamicMax, kDynamicHold, kLogObjects };
+             kDynamicMax, kDynamicHold, kLogObjects, kBlood };
 
 using rows::Kind;
 using rows::Row;
@@ -328,6 +328,7 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kGodMode, "GOD MODE"},
     {Kind::Value, kOneHitKill, "ONE-HIT KILL"},
     {Kind::Value, kEsp, "ESP LINES"},
+    {Kind::Value, kBlood, "BLOOD"},
     {Kind::Value, kAimbot, "AIMBOT (WHILE AIMING IN)"},  // esp.cpp turns the view only at a zoom above 1
     {Kind::Heading, -1, "GAME"},
     {Kind::Value, kGameSpeed, "GAME SPEED"},
@@ -413,6 +414,7 @@ bool* ToggleFlag(Settings& s, int id) {
         case kUnlockLevels: return &o.unlock_levels;
         case kUnlockBlackOps: return &o.unlock_black_ops;
         case kEsp: return &o.esp;
+        case kBlood: return &o.blood;
         case kAimbot: return &o.aimbot;
         case kDynamicRes: return &o.dynamic_resolution;
         default: return nullptr;
@@ -691,6 +693,7 @@ void RestoreDefaults(int page) {
         o.unlock_levels = none.unlock_levels;
         o.unlock_black_ops = none.unlock_black_ops;
         o.esp = none.esp;
+        o.blood = none.blood;
         o.aimbot = none.aimbot;
         Changed();
         return;
@@ -722,6 +725,7 @@ void RestoreDefaults(int page) {
     o.unlock_levels = keep.unlock_levels;
     o.unlock_black_ops = keep.unlock_black_ops;
     o.esp = keep.esp;
+    o.blood = keep.blood;
     o.aimbot = keep.aimbot;
     Changed();
 }

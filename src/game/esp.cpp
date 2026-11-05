@@ -112,6 +112,30 @@ Vertex* Segment(Vertex* v, float x0, float y0, float x1, float y1, float width) 
     return v;
 }
 
+// BLOOD: Black has none, so a hit on an enemy sprays red streaks from it. They are drawn in the 2D layer like the ESP,
+// each a drop thrown from the hit that falls under gravity, projected with the scene's view
+constexpr size_t kSpurts = 12;                   // hits shown at once
+constexpr size_t kDrops = 14;                    // streaks a hit
+constexpr size_t kBloodVertices = kSpurts * kDrops * 6;
+constexpr float kBloodLife = 0.7f;               // seconds
+constexpr float kBloodThickness = 2.5f;          // of a 480 frame
+constexpr float kBloodColour[4] = {0.55f, 0.02f, 0.02f, 1.0f};
+
+struct Spurt {
+    bool live = false;
+    float at[3];
+    float away[2];  // along the ground, from the player to the enemy
+    uint32_t seed;
+    std::chrono::steady_clock::time_point when;
+};
+Spurt g_spurts[kSpurts];
+size_t g_next_spurt;
+
+float Random(uint32_t& seed) {
+    seed = seed * 1664525u + 1013904223u;
+    return float(seed >> 8) / float(1 << 24);
+}
+
 }  // namespace
 
 namespace game {
@@ -151,8 +175,7 @@ void Aimbot(X86Context& ctx) {
 }
 
 // D3DVIEWPORT8: x, y, width, height. Called between the 2D layer's begin and end
-void DrawEsp(X86Context& ctx, float unit) {
-    if (!Opt().esp || !g_camera || !R32(kWorld)) return;
+static void DrawLines(X86Context& ctx, float unit) {
     uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
     float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
     float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
@@ -195,6 +218,86 @@ void DrawEsp(X86Context& ctx, float unit) {
     CallGuest(ctx, kTriangles, {offset, colours});
     ctx.eax = eax;
     ctx.ecx = ecx;
+}
+
+// a hit on the enemy: the blood starts from its chest
+void BloodSpurt(uint32_t victim) {
+    if (!Opt().blood) return;
+    const float* at = &G<float>(victim + kCharPosition);
+    Spurt& s = g_spurts[g_next_spurt++ % kSpurts];
+    s.at[0] = at[0];
+    s.at[1] = at[1] + kChest;
+    s.at[2] = at[2];
+    s.away[0] = s.away[1] = 0;
+    if (uint32_t me = R32(kWorld) ? R32(kWorld) + kWorldPlayer : 0) {
+        const float* from = &G<float>(me + kCharPosition);
+        float dx = at[0] - from[0], dz = at[2] - from[2];
+        float length = std::sqrt(dx * dx + dz * dz);
+        if (length > 0.01f) s.away[0] = dx / length, s.away[1] = dz / length;
+    }
+    s.when = std::chrono::steady_clock::now();
+    s.seed = uint32_t(s.when.time_since_epoch().count()) ^ victim;
+    s.live = true;
+}
+
+static void DrawBlood(X86Context& ctx, float unit) {
+    uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
+    float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
+    float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
+    static const uint32_t buffer = mem::AllocSystem(kBloodVertices * sizeof(Vertex), 16);
+    static const uint32_t offset = mem::AllocSystem(8, 16);
+    static const uint32_t colours = [] {
+        uint32_t c = mem::AllocSystem(kBloodVertices * sizeof(kBloodColour), 16);
+        for (size_t i = 0; i < kBloodVertices; i++)
+            std::memcpy(HostPtr(c + i * sizeof(kBloodColour)), kBloodColour, sizeof(kBloodColour));
+        return c;
+    }();
+    Vertex* first = static_cast<Vertex*>(HostPtr(buffer));
+    Vertex* v = first;
+    float width = kBloodThickness * unit;
+    auto now = std::chrono::steady_clock::now();
+    for (Spurt& s : g_spurts) {
+        if (!s.live) continue;
+        float age = std::chrono::duration<float>(now - s.when).count();
+        if (age > kBloodLife) {
+            s.live = false;
+            continue;
+        }
+        uint32_t seed = s.seed;
+        for (size_t d = 0; d < kDrops; d++) {
+            float angle = Random(seed) * 6.2831853f;
+            float speed = 1.0f + Random(seed) * 3.0f;
+            float rise = 1.0f + Random(seed) * 3.0f;
+            float vel[3] = {std::cos(angle) * speed + s.away[0] * 2.5f, rise, std::sin(angle) * speed + s.away[1] * 2.5f};
+            auto place = [&](float t, float out[3]) {
+                out[0] = s.at[0] + vel[0] * t;
+                out[1] = s.at[1] + vel[1] * t - 4.9f * t * t;
+                out[2] = s.at[2] + vel[2] * t;
+            };
+            float tail[3], head[3], a[2], b[2];
+            place(std::max(age - 0.05f, 0.0f), tail);
+            place(age, head);
+            if (head[1] < s.at[1] - kChest) continue;  // it hit the ground
+            if (!Project(tail, vx, vy, vw, vh, a) || !Project(head, vx, vy, vw, vh, b)) continue;
+            v = Segment(v, a[0], a[1], b[0], b[1], width);
+        }
+    }
+    if (v == first) return;
+    W32(offset, 0);
+    W32(offset + 4, 0);
+    uint32_t eax = ctx.eax, ecx = ctx.ecx;
+    ctx.eax = uint32_t(v - first) / 3;
+    ctx.ecx = buffer;
+    CallGuest(ctx, kTriangles, {offset, colours});
+    ctx.eax = eax;
+    ctx.ecx = ecx;
+}
+
+// the ESP's lines and the blood, between the 2D layer's begin and end
+void DrawEsp(X86Context& ctx, float unit) {
+    if (!g_camera || !R32(kWorld)) return;
+    if (Opt().esp) DrawLines(ctx, unit);
+    if (Opt().blood) DrawBlood(ctx, unit);
 }
 
 }  // namespace game
