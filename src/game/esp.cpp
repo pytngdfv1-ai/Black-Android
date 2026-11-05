@@ -113,14 +113,17 @@ Vertex* Segment(Vertex* v, float x0, float y0, float x1, float y1, float width) 
     return v;
 }
 
-// BLOOD: Black has none, so a hit on an enemy sprays red streaks from it. They are drawn in the 2D layer like the ESP,
-// each a drop thrown from the hit that falls under gravity, projected with the scene's view
-constexpr size_t kSpurts = 14;                   // hits shown at once
-constexpr size_t kDrops = 28;                    // streaks a hit
-constexpr size_t kBloodVertices = kSpurts * kDrops * 6;
-constexpr float kBloodLife = 0.9f;               // seconds
+// BLOOD: Black has none, so a hit on an enemy splatters: a splat on the screen at the hit, flying streaks and round
+// drops thrown from it that fall under gravity (projected with the scene's view), and drips. Three styles, picked by the
+// hit: a burst with spikes, a directional spray, a big blob with drips. Drawn in the 2D layer like the ESP
+constexpr size_t kSpurts = 10;                   // hits shown at once
+constexpr size_t kBloodVertices = kSpurts * 900;
+constexpr float kBloodLife = 1.6f;               // seconds a splat stays
+constexpr float kDropLife = 0.9f;                // seconds the drops fly
 constexpr float kBloodThickness = 3.0f;          // of a 480 frame
-constexpr float kBloodColour[4] = {0.30f, 0.0f, 0.0f, 1.0f};
+constexpr float kBloodColours[4][4] = {{0.30f, 0.0f, 0.0f, 1.0f}, {0.20f, 0.0f, 0.0f, 1.0f},
+                                       {0.45f, 0.01f, 0.01f, 1.0f}, {0.12f, 0.0f, 0.0f, 1.0f}};
+constexpr float kPi2 = 6.2831853f;
 
 struct Spurt {
     bool live = false;
@@ -242,21 +245,62 @@ void BloodSpurt(uint32_t victim) {
     s.live = true;
 }
 
+struct BloodOut {
+    Vertex* v;
+    Vertex* end;
+    float* colour;  // a colour a vertex, in step with v
+    Vertex* first;
+};
+
+static void BloodTri(BloodOut& o, float x0, float y0, float x1, float y1, float x2, float y2, const float* c) {
+    if (o.v + 3 > o.end) return;
+    const float p[3][2] = {{x0, y0}, {x1, y1}, {x2, y2}};
+    for (int i = 0; i < 3; i++) {
+        *o.v = {p[i][0], p[i][1]};
+        std::memcpy(o.colour + (o.v - o.first) * 4, c, 4 * sizeof(float));
+        o.v++;
+    }
+}
+
+static void BloodQuad(BloodOut& o, float x0, float y0, float x1, float y1, float width, const float* c) {
+    float dx = x1 - x0, dy = y1 - y0, length = std::sqrt(dx * dx + dy * dy);
+    if (!(length > 0)) return;
+    float nx = -dy / length * width * 0.5f, ny = dx / length * width * 0.5f;
+    BloodTri(o, x0 + nx, y0 + ny, x0 - nx, y0 - ny, x1 + nx, y1 + ny, c);
+    BloodTri(o, x1 + nx, y1 + ny, x0 - nx, y0 - ny, x1 - nx, y1 - ny, c);
+}
+
+// an irregular blob round (cx, cy); spiky pushes some points far out
+static void BloodBlob(BloodOut& o, float cx, float cy, float r, int points, float spiky, uint32_t seed, const float* c) {
+    float px = 0, py = 0, fx = 0, fy = 0;
+    float turn = Random(seed) * kPi2;
+    for (int i = 0; i <= points; i++) {
+        float x, y;
+        if (i == points) {
+            x = fx, y = fy;
+        } else {
+            float angle = turn + kPi2 * (float(i) + Random(seed) * 0.5f) / float(points);
+            float radius = r * (0.55f + Random(seed) * 0.45f);
+            if (Random(seed) < spiky) radius *= 1.6f + Random(seed) * 1.8f;
+            x = cx + std::cos(angle) * radius, y = cy + std::sin(angle) * radius;
+            if (i == 0) fx = x, fy = y;
+        }
+        if (i) BloodTri(o, cx, cy, px, py, x, y, c);
+        px = x, py = y;
+    }
+}
+
 static void DrawBlood(X86Context& ctx, float unit) {
     uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
     float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
     float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
     static const uint32_t buffer = mem::AllocSystem(kBloodVertices * sizeof(Vertex), 16);
     static const uint32_t offset = mem::AllocSystem(8, 16);
-    static const uint32_t colours = [] {
-        uint32_t c = mem::AllocSystem(kBloodVertices * sizeof(kBloodColour), 16);
-        for (size_t i = 0; i < kBloodVertices; i++)
-            std::memcpy(HostPtr(c + i * sizeof(kBloodColour)), kBloodColour, sizeof(kBloodColour));
-        return c;
-    }();
-    Vertex* first = static_cast<Vertex*>(HostPtr(buffer));
-    Vertex* v = first;
-    float width = kBloodThickness * unit;
+    static const uint32_t colours = mem::AllocSystem(kBloodVertices * 4 * sizeof(float), 16);
+    BloodOut o;
+    o.first = o.v = static_cast<Vertex*>(HostPtr(buffer));
+    o.end = o.first + kBloodVertices;
+    o.colour = static_cast<float*>(HostPtr(colours));
     auto now = std::chrono::steady_clock::now();
     for (Spurt& s : g_spurts) {
         if (!s.live) continue;
@@ -266,29 +310,89 @@ static void DrawBlood(X86Context& ctx, float unit) {
             continue;
         }
         uint32_t seed = s.seed;
-        for (size_t d = 0; d < kDrops; d++) {
-            float angle = Random(seed) * 6.2831853f;
-            float speed = 1.0f + Random(seed) * 3.0f;
-            float rise = 1.0f + Random(seed) * 3.0f;
-            float vel[3] = {std::cos(angle) * speed + s.away[0] * 2.5f, rise, std::sin(angle) * speed + s.away[1] * 2.5f};
+        int style = std::min(int(Random(seed) * 3), 2);  // 0 burst, 1 spray, 2 blob
+        const float* main = kBloodColours[std::min(int(Random(seed) * 3), 2)];
+        // each part has its own stream, so what is on screen never shifts the rest
+        uint32_t splat = seed ^ 0x9E3779B9u, thrown = seed ^ 0x85EBCA6Bu, spikes = seed ^ 0xC2B2AE35u;
+        // the splat's size: grows fast, holds, shrinks away at the end
+        float grow = std::min(age / 0.10f, 1.0f);
+        float fade = std::min((kBloodLife - age) / 0.5f, 1.0f);
+        float scale = grow * fade;
+        float centre[2], up[2];
+        float above[3] = {s.at[0], s.at[1] + 0.5f, s.at[2]};
+        bool seen = Project(s.at, vx, vy, vw, vh, centre) && Project(above, vx, vy, vw, vh, up);
+        float ppm = seen ? std::sqrt((centre[0] - up[0]) * (centre[0] - up[0]) + (centre[1] - up[1]) * (centre[1] - up[1])) / 0.5f : 0;
+        // per style: splat radius in metres, spike share, satellites, streaks, round drops, drips
+        static const float kRadius[3] = {0.55f, 0.35f, 0.85f};
+        static const float kSpiky[3] = {0.55f, 0.25f, 0.15f};
+        static const int kSatellites[3] = {5, 3, 7};
+        static const int kStreaks[3] = {22, 40, 10};
+        static const int kRound[3] = {14, 18, 10};
+        static const int kDrips[3] = {0, 0, 4};
+        // the splat, its satellites and drips
+        if (seen && ppm > 0 && scale > 0) {
+            float r = ppm * kRadius[style] * scale;
+            BloodBlob(o, centre[0], centre[1], r, 16, kSpiky[style], splat, main);
+            for (int i = 0; i < kSatellites[style]; i++) {
+                float angle = Random(splat) * kPi2, dist = r * (1.3f + Random(splat) * 1.6f), size = r * (0.12f + Random(splat) * 0.25f);
+                BloodBlob(o, centre[0] + std::cos(angle) * dist, centre[1] + std::sin(angle) * dist * 0.8f, size, 8, 0.1f, splat,
+                          kBloodColours[std::min(int(Random(splat) * 3), 2)]);
+            }
+            for (int i = 0; i < kDrips[style]; i++) {
+                float across = (Random(splat) - 0.5f) * r * 1.4f, length = r * (0.8f + Random(splat) * 1.6f);
+                float run = std::min(age / 0.9f, 1.0f) * length;
+                float width = r * (0.10f + Random(splat) * 0.08f);
+                BloodQuad(o, centre[0] + across, centre[1], centre[0] + across, centre[1] + run, width, main);
+                BloodBlob(o, centre[0] + across, centre[1] + run, width * 0.9f, 7, 0.0f, splat, main);
+            }
+        }
+        // streaks and round drops thrown from the hit
+        float dropAge = std::min(age, kDropLife);
+        bool flying = age < kDropLife;
+        float thrust = style == 1 ? 5.0f : 2.5f;
+        for (int d = 0; d < kStreaks[style] + kRound[style]; d++) {
+            bool streak = d < kStreaks[style];
+            float angle = Random(thrown) * kPi2;
+            float speed = 1.0f + Random(thrown) * (style == 1 ? 4.0f : 3.0f);
+            float rise = 0.5f + Random(thrown) * 3.5f;
+            float size = Random(thrown);
+            const float* col = kBloodColours[std::min(int(Random(thrown) * 4), 3)];
+            if (!flying) continue;
+            float vel[3] = {std::cos(angle) * speed + s.away[0] * thrust, rise, std::sin(angle) * speed + s.away[1] * thrust};
             auto place = [&](float t, float out[3]) {
                 out[0] = s.at[0] + vel[0] * t;
                 out[1] = s.at[1] + vel[1] * t - 4.9f * t * t;
                 out[2] = s.at[2] + vel[2] * t;
             };
-            float tail[3], head[3], a[2], b[2];
-            place(std::max(age - 0.05f, 0.0f), tail);
-            place(age, head);
-            if (head[1] < s.at[1] - kChest) continue;  // it hit the ground
-            if (!Project(tail, vx, vy, vw, vh, a) || !Project(head, vx, vy, vw, vh, b)) continue;
-            v = Segment(v, a[0], a[1], b[0], b[1], width);
+            float head[3], a[2], b[2];
+            place(dropAge, head);
+            if (head[1] < s.at[1] - 1.2f) continue;  // it hit the ground
+            if (!Project(head, vx, vy, vw, vh, b)) continue;
+            if (streak) {
+                float tail[3];
+                place(std::max(dropAge - 0.06f, 0.0f), tail);
+                if (!Project(tail, vx, vy, vw, vh, a)) continue;
+                BloodQuad(o, a[0], a[1], b[0], b[1], kBloodThickness * unit * (0.5f + size * 1.5f), col);
+            } else if (ppm > 0) {
+                BloodBlob(o, b[0], b[1], ppm * (0.025f + size * 0.07f), 6, 0.0f, thrown + d, col);
+            }
+        }
+        if (style == 0 && seen && ppm > 0 && scale > 0) {  // spikes of the burst, thin and long
+            float r = ppm * kRadius[0] * scale;
+            for (int i = 0; i < 14; i++) {
+                float angle = Random(spikes) * kPi2, length = r * (1.4f + Random(spikes) * 2.6f), width = r * 0.07f;
+                float tx = centre[0] + std::cos(angle) * length, ty = centre[1] + std::sin(angle) * length;
+                float bx = centre[0] + std::cos(angle) * r * 0.5f, by = centre[1] + std::sin(angle) * r * 0.5f;
+                BloodTri(o, bx - std::sin(angle) * width, by + std::cos(angle) * width, bx + std::sin(angle) * width,
+                         by - std::cos(angle) * width, tx, ty, main);
+            }
         }
     }
-    if (v == first) return;
+    if (o.v == o.first) return;
     W32(offset, 0);
     W32(offset + 4, 0);
     uint32_t eax = ctx.eax, ecx = ctx.ecx;
-    ctx.eax = uint32_t(v - first) / 3;
+    ctx.eax = uint32_t(o.v - o.first) / 3;
     ctx.ecx = buffer;
     CallGuest(ctx, kTriangles, {offset, colours});
     ctx.eax = eax;
