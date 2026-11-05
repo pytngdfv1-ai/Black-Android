@@ -58,7 +58,9 @@ void DumpObjects() {
     };
     std::map<uint32_t, Kind> kinds;
     auto Sane = [](float v) { return std::isnormal(v) && std::fabs(v) < 3000; };
-    for (uint32_t page = kHeapLow; page < kHeapHigh; page += 0x1000) {
+    // the game's objects sit in the contiguous memory (the player is at 0x816AF1B0), past the 0x40000000 heap
+    for (uint32_t page = kHeapLow; page != 0x84000000; page += 0x1000) {
+        if (page == kHeapHigh) page = 0x80000000;
         if (!mem::IsCommitted(page) || !mem::IsCommitted(page + 0x1000 - 4)) continue;
         for (uint32_t at = page; at + 0xD0 <= page + 0x1000; at += 4) {
             uint32_t kind = R32(at + 0xC4);
