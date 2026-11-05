@@ -116,11 +116,11 @@ Vertex* Segment(Vertex* v, float x0, float y0, float x1, float y1, float width) 
 // BLOOD: Black has none, so a hit on an enemy splatters: a splat on the screen at the hit, flying streaks and round
 // drops thrown from it that fall under gravity (projected with the scene's view), and drips. Three styles, picked by the
 // hit: a burst with spikes, a directional spray, a big blob with drips. Drawn in the 2D layer like the ESP
-constexpr size_t kSpurts = 10;                   // hits shown at once
-constexpr size_t kBloodVertices = kSpurts * 900;
+constexpr size_t kSpurts = 8;                    // hits shown at once
+constexpr size_t kBloodVertices = kSpurts * 1800;
 constexpr float kBloodLife = 1.6f;               // seconds a splat stays
 constexpr float kDropLife = 0.9f;                // seconds the drops fly
-constexpr float kBloodThickness = 3.0f;          // of a 480 frame
+constexpr float kBloodThickness = 1.5f;          // of a 480 frame
 constexpr float kBloodColours[4][4] = {{0.30f, 0.0f, 0.0f, 1.0f}, {0.20f, 0.0f, 0.0f, 1.0f},
                                        {0.45f, 0.01f, 0.01f, 1.0f}, {0.12f, 0.0f, 0.0f, 1.0f}};
 constexpr float kPi2 = 6.2831853f;
@@ -323,15 +323,15 @@ static void DrawBlood(X86Context& ctx, float unit) {
         bool seen = Project(s.at, vx, vy, vw, vh, centre) && Project(above, vx, vy, vw, vh, up);
         float ppm = seen ? std::sqrt((centre[0] - up[0]) * (centre[0] - up[0]) + (centre[1] - up[1]) * (centre[1] - up[1])) / 0.5f : 0;
         // per style: splat radius in metres, spike share, satellites, streaks, round drops, drips
-        static const float kRadius[3] = {0.55f, 0.35f, 0.85f};
+        static const float kRadius[3] = {0.28f, 0.18f, 0.42f};
         static const float kSpiky[3] = {0.55f, 0.25f, 0.15f};
-        static const int kSatellites[3] = {5, 3, 7};
-        static const int kStreaks[3] = {22, 40, 10};
-        static const int kRound[3] = {14, 18, 10};
-        static const int kDrips[3] = {0, 0, 4};
+        static const int kSatellites[3] = {10, 6, 14};
+        static const int kStreaks[3] = {44, 80, 20};
+        static const int kRound[3] = {28, 36, 20};
+        static const int kDrips[3] = {0, 0, 8};
         // the splat, its satellites and drips
         if (seen && ppm > 0 && scale > 0) {
-            float r = ppm * kRadius[style] * scale;
+            float r = std::min(ppm * kRadius[style], vh * 0.08f) * scale;  // capped: close up it would fill the screen
             BloodBlob(o, centre[0], centre[1], r, 16, kSpiky[style], splat, main);
             for (int i = 0; i < kSatellites[style]; i++) {
                 float angle = Random(splat) * kPi2, dist = r * (1.3f + Random(splat) * 1.6f), size = r * (0.12f + Random(splat) * 0.25f);
@@ -349,16 +349,19 @@ static void DrawBlood(X86Context& ctx, float unit) {
         // streaks and round drops thrown from the hit
         float dropAge = std::min(age, kDropLife);
         bool flying = age < kDropLife;
-        float thrust = style == 1 ? 5.0f : 2.5f;
+        float thrust = style == 1 ? 3.0f : 1.5f;
         for (int d = 0; d < kStreaks[style] + kRound[style]; d++) {
             bool streak = d < kStreaks[style];
             float angle = Random(thrown) * kPi2;
-            float speed = 1.0f + Random(thrown) * (style == 1 ? 4.0f : 3.0f);
-            float rise = 0.5f + Random(thrown) * 3.5f;
+            float speed = 0.5f + Random(thrown) * (style == 1 ? 2.0f : 1.5f);
+            float rise = 0.3f + Random(thrown) * 1.8f;
             float size = Random(thrown);
             const float* col = kBloodColours[std::min(int(Random(thrown) * 4), 3)];
             if (!flying) continue;
             float vel[3] = {std::cos(angle) * speed + s.away[0] * thrust, rise, std::sin(angle) * speed + s.away[1] * thrust};
+            // never towards the player: that is what jumps at the screen. Mirror it to the far side
+            float toward = vel[0] * s.away[0] + vel[2] * s.away[1];
+            if (toward < 0) vel[0] -= 2 * toward * s.away[0], vel[2] -= 2 * toward * s.away[1];
             auto place = [&](float t, float out[3]) {
                 out[0] = s.at[0] + vel[0] * t;
                 out[1] = s.at[1] + vel[1] * t - 4.9f * t * t;
@@ -374,7 +377,7 @@ static void DrawBlood(X86Context& ctx, float unit) {
                 if (!Project(tail, vx, vy, vw, vh, a)) continue;
                 BloodQuad(o, a[0], a[1], b[0], b[1], kBloodThickness * unit * (0.5f + size * 1.5f), col);
             } else if (ppm > 0) {
-                BloodBlob(o, b[0], b[1], ppm * (0.025f + size * 0.07f), 6, 0.0f, thrown + d, col);
+                BloodBlob(o, b[0], b[1], ppm * (0.012f + size * 0.035f), 6, 0.0f, thrown + d, col);
             }
         }
         if (style == 0 && seen && ppm > 0 && scale > 0) {  // spikes of the burst, thin and long
