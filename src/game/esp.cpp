@@ -297,13 +297,6 @@ static void DrawBlood(X86Context& ctx, float unit) {
 
 // the ESP's lines and the blood, between the 2D layer's begin and end
 void DrawEsp(X86Context& ctx, float unit) {
-    // discovery: a level's objects go to the log once, 15 s after it loads
-    static int frames = 0;
-    if (!R32(kWorld)) frames = 0;
-    else if (frames <= 600) {
-        if (++frames == 1) LOGI("objects: level up, dump in 10 s");
-        if (frames == 600) DumpObjects();
-    }
     if (!g_camera || !R32(kWorld)) return;
     if (Opt().esp) DrawLines(ctx, unit);
     if (Opt().blood) DrawBlood(ctx, unit);
@@ -316,6 +309,12 @@ void DrawEsp(X86Context& ctx, float unit) {
 X86_EXTERN_FUNC(__imp__sub_001DFD90);
 X86_FUNC(sub_001DFD90) {
     uint32_t who = ctx.ecx;
+    // discovery: a level's objects go to the log once, 10 s after its characters first run
+    static std::chrono::steady_clock::time_point since;
+    static int stage = 0;
+    if (!R32(kWorld)) stage = 0;
+    else if (stage == 0) stage = 1, since = std::chrono::steady_clock::now(), LOGI("objects: level up, dump in 10 s");
+    else if (stage == 1 && std::chrono::steady_clock::now() - since > std::chrono::seconds(10)) stage = 2, game::DumpObjects();
     if ((game::Opt().esp || game::Opt().aimbot) && who && R32(who + kCharKind) == kEnemyKind && !R32(who + kCharDying)) Remember(who);
     __imp__sub_001DFD90(ctx, base);
 }
