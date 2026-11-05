@@ -2,11 +2,13 @@
 // class (the first word of an object points to a table of code addresses). The counts of a class are the way to
 // tell what each is: a level has so many intel, laptops and weapons to find. Run it in a level, then send the log
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <vector>
 
 #include "core/log.h"
+#include "game/layout.h"
 #include "kernel/memory.h"
 #include "xdk/hle.h"
 
@@ -42,9 +44,24 @@ bool Table(uint32_t v) {
 
 namespace game {
 
+// the entity base holds the position at +A0 and the kind at +C4 (characters do): every class whose objects have one
+// near the player is a candidate for intel, laptops and weapons, with its kinds by count
 void DumpObjects() {
-    std::map<uint32_t, std::vector<uint32_t>> classes;
-    std::map<uint32_t, bool> known;  // a table seen: is it one
+    uint32_t me = R32(layout::kWorld) ? R32(layout::kWorld) + layout::kWorldPlayer : 0;
+    if (!me) return;
+    float p[3];
+    for (int k = 0; k < 3; k++) p[k] = G<float>(me + 0xA0 + k * 4);
+    LOGR("objects: player %.2f %.2f %.2f", p[0], p[1], p[2]);
+    struct Kind {
+        uint32_t count = 0;
+        std::vector<uint32_t> at;
+    };
+    struct Class {
+        uint32_t total = 0, near = 0;
+        std::map<uint32_t, Kind> kinds;
+    };
+    std::map<uint32_t, Class> classes;
+    std::map<uint32_t, bool> known;
     for (uint32_t page = kHeapLow; page < kHeapHigh; page += 0x1000) {
         if (!mem::IsCommitted(page)) continue;
         for (uint32_t at = page; at < page + 0x1000; at += 4) {
@@ -53,25 +70,30 @@ void DumpObjects() {
             auto it = known.find(v);
             if (it == known.end()) it = known.emplace(v, Table(v)).first;
             if (!it->second) continue;
-            std::vector<uint32_t>& list = classes[v];
-            if (list.size() < kMaxPerClass) list.push_back(at);
-        }
-    }
-    std::vector<std::pair<uint32_t, uint32_t>> order;  // count, table
-    for (auto& [v, list] : classes) order.push_back({uint32_t(list.size()), v});
-    std::sort(order.begin(), order.end());
-    LOGR("objects: %zu classes", order.size());
-    for (auto& [count, v] : order) {
-        if (count > 600) continue;
-        LOGR("objects: class %08X count %u", v, count);
-        const std::vector<uint32_t>& list = classes[v];
-        for (uint32_t i = 0; i < std::min<uint32_t>(kShown, count); i++) {
-            uint32_t at = list[i];
+            Class& c = classes[v];
+            c.total++;
+            if (!Readable(at + 0xA0, 0xD0)) continue;
             float f[3];
             for (int k = 0; k < 3; k++) f[k] = G<float>(at + 0xA0 + k * 4);
-            LOGR("objects:   %08X  +A0 %.2f %.2f %.2f  +C4 %u", at, f[0], f[1], f[2], R32(at + 0xC4));
-            for (uint32_t off = 0; off < kBytes; off += 0x20) {
-                if (!Readable(at + off, 0x20)) break;
+            if (!(std::fabs(f[0] - p[0]) < 400 && std::fabs(f[1] - p[1]) < 120 && std::fabs(f[2] - p[2]) < 400)) continue;
+            if (f[0] == 0 && f[1] == 0 && f[2] == 0) continue;
+            c.near++;
+            Kind& k = c.kinds[R32(at + 0xC4)];
+            if (k.count++ < 3) k.at.push_back(at);
+        }
+    }
+    LOGR("objects: %zu classes", classes.size());
+    for (auto& [v, c] : classes) {
+        if (!c.near) continue;
+        LOGR("objects: class %08X total %u near %u kinds %zu", v, c.total, c.near, c.kinds.size());
+        int shown = 0;
+        for (auto& [kind, k] : c.kinds) {
+            LOGR("objects:  kind %08X count %u", kind, k.count);
+            if (shown++ >= 10) break;
+            uint32_t at = k.at[0];
+            LOGR("objects:   %08X  pos %.2f %.2f %.2f  d %.1f", at, G<float>(at + 0xA0), G<float>(at + 0xA4), G<float>(at + 0xA8),
+                 std::sqrt(std::pow(G<float>(at + 0xA0) - p[0], 2) + std::pow(G<float>(at + 0xA8) - p[2], 2)));
+            for (uint32_t off = 0; off < 0x40; off += 0x20) {
                 char line[160];
                 int n = 0;
                 for (uint32_t w = 0; w < 8; w++) n += std::snprintf(line + n, sizeof(line) - n, " %08X", R32(at + off + w * 4));

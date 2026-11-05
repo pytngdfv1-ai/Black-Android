@@ -416,12 +416,12 @@ void DrawEsp(X86Context& ctx, float unit) {
 X86_EXTERN_FUNC(__imp__sub_001DFD90);
 X86_FUNC(sub_001DFD90) {
     uint32_t who = ctx.ecx;
-    // discovery: a level's objects go to the log once, 10 s after its characters first run
+    // discovery: a level's objects go to the log once, 15 s after its first enemy runs (they are placed by then)
     static std::chrono::steady_clock::time_point since;
     static int stage = 0;
     if (!R32(kWorld)) stage = 0;
-    else if (stage == 0) stage = 1, since = std::chrono::steady_clock::now(), LOGR("objects: level up, dump in 10 s");
-    else if (stage == 1 && std::chrono::steady_clock::now() - since > std::chrono::seconds(10)) stage = 2, game::DumpObjects();
+    else if (stage == 0 && who && R32(who + kCharKind) == kEnemyKind) stage = 1, since = std::chrono::steady_clock::now(), LOGR("objects: enemy up, dump in 15 s");
+    else if (stage == 1 && std::chrono::steady_clock::now() - since > std::chrono::seconds(15)) stage = 2, game::DumpObjects();
     if ((game::Opt().esp || game::Opt().aimbot) && who && R32(who + kCharKind) == kEnemyKind && !R32(who + kCharDying)) Remember(who);
     __imp__sub_001DFD90(ctx, base);
 }
