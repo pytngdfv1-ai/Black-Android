@@ -1,6 +1,7 @@
 // The cheats page's ESP LINES: each living enemy gets a box round it and a line to it from the bottom of the screen,
 // drawn over the finished frame with the view the scene was drawn with. AIMBOT: while the player aims in the view
 // turns to the body of the living enemy nearest the crosshair
+#include "core/log.h"
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -299,7 +300,10 @@ void DrawEsp(X86Context& ctx, float unit) {
     // discovery: a level's objects go to the log once, 15 s after it loads
     static int frames = 0;
     if (!R32(kWorld)) frames = 0;
-    else if (frames <= 900 && ++frames == 900) DumpObjects();
+    else if (frames <= 600) {
+        if (++frames == 1) LOGI("objects: level up, dump in 10 s");
+        if (frames == 600) DumpObjects();
+    }
     if (!g_camera || !R32(kWorld)) return;
     if (Opt().esp) DrawLines(ctx, unit);
     if (Opt().blood) DrawBlood(ctx, unit);
