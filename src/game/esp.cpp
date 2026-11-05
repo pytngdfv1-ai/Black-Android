@@ -114,12 +114,12 @@ Vertex* Segment(Vertex* v, float x0, float y0, float x1, float y1, float width) 
 
 // BLOOD: Black has none, so a hit on an enemy sprays red streaks from it. They are drawn in the 2D layer like the ESP,
 // each a drop thrown from the hit that falls under gravity, projected with the scene's view
-constexpr size_t kSpurts = 12;                   // hits shown at once
-constexpr size_t kDrops = 14;                    // streaks a hit
+constexpr size_t kSpurts = 14;                   // hits shown at once
+constexpr size_t kDrops = 28;                    // streaks a hit
 constexpr size_t kBloodVertices = kSpurts * kDrops * 6;
-constexpr float kBloodLife = 0.7f;               // seconds
-constexpr float kBloodThickness = 2.5f;          // of a 480 frame
-constexpr float kBloodColour[4] = {0.55f, 0.02f, 0.02f, 1.0f};
+constexpr float kBloodLife = 0.9f;               // seconds
+constexpr float kBloodThickness = 3.0f;          // of a 480 frame
+constexpr float kBloodColour[4] = {0.30f, 0.0f, 0.0f, 1.0f};
 
 struct Spurt {
     bool live = false;
@@ -139,6 +139,7 @@ float Random(uint32_t& seed) {
 }  // namespace
 
 namespace game {
+void DumpObjects();  // objects.cpp
 
 // the device's view and projection as the scene draws them (D3DDevice_SetTransform, view 0 and projection 1)
 void EspCamera() {
@@ -295,6 +296,10 @@ static void DrawBlood(X86Context& ctx, float unit) {
 
 // the ESP's lines and the blood, between the 2D layer's begin and end
 void DrawEsp(X86Context& ctx, float unit) {
+    // discovery: a level's objects go to the log once, 15 s after it loads
+    static int frames = 0;
+    if (!R32(kWorld)) frames = 0;
+    else if (frames <= 900 && ++frames == 900) DumpObjects();
     if (!g_camera || !R32(kWorld)) return;
     if (Opt().esp) DrawLines(ctx, unit);
     if (Opt().blood) DrawBlood(ctx, unit);
