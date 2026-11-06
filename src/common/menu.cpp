@@ -63,7 +63,8 @@ void CheckForUpdates();
 }  // namespace host
 
 namespace game {
-void DumpObjects();  // objects.cpp
+void DumpObjects();
+int FindItemStep(bool advance);  // objects.cpp
 }
 
 namespace app {
@@ -252,7 +253,7 @@ enum RowId { kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlu
              kCheckUpdates, kTouchSensitivity, kLeftDeadzone, kRightDeadzone, kLeftSensitivity, kRightSensitivity,
              kScreenFilter, kGyroInvertX, kGyroInvertY, kUnlockLevels, kUnlockBlackOps, kTouchSkin, kCredit, kBloom,
              kFog, kAntiAliasing, kHdr, kEsp, kAimbot, kTouchStick, kDynamicRes, kDynamicTarget, kDynamicMin,
-             kDynamicMax, kDynamicHold, kLogObjects, kBlood, kMarkerKind };
+             kDynamicMax, kDynamicHold, kLogObjects, kBlood, kMarkerKind, kFindItem };
 
 using rows::Kind;
 using rows::Row;
@@ -337,6 +338,7 @@ constexpr Row kCheatRows[] = {
     {Kind::Heading, -1, "DEVELOPER"},
     {Kind::Value, kLogObjects, "LOG OBJECTS TO THE LOG FILE"},
     {Kind::Value, kMarkerKind, "MARK ENTITY TYPE (FIND ITEMS)"},
+    {Kind::Value, kFindItem, "FIND ITEM: PRESS, PICK UP, PRESS"},
 };
 
 // the title menu's CREDITS page: who and what, and the links, which open in the browser. Its rows take no step; a
@@ -521,6 +523,12 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
             if (step) game::DumpObjects();  // objects.cpp: the level's objects, by class, into the log
             std::snprintf(text, sizeof(text), "PRESS");
             return true;
+        case kFindItem: {
+            int state = game::FindItemStep(step != 0);  // objects.cpp: what changes when an item is picked up
+            static const char* kText[] = {"1/3 PRESS (STAND NEXT TO IT)", "2/3 PRESS (1 SECOND LATER)", "3/3 PICK IT UP, PRESS"};
+            std::snprintf(text, sizeof(text), "%s", kText[state]);
+            return true;
+        }
         case kMarkerKind:
             if (step) o.marker_kind = uint32_t(StepRange(int(o.marker_kind), 0, 60, 1, step));
             if (!o.marker_kind) std::snprintf(text, sizeof(text), "OFF");

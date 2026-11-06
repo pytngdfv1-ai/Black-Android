@@ -3,6 +3,8 @@
 // tell what each is: a level has so many intel, laptops and weapons to find. Run it in a level, then send the log
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <utility>
 #include <cstdio>
 #include <map>
 #include <vector>
@@ -90,6 +92,63 @@ void DumpObjects() {
         }
     }
     LOGR("objects: done");
+}
+
+// find what changes when an item is picked up: A1 and A2 a second apart tell what changes by itself, B after the pickup;
+// what differs in B and was still in A1 and A2 belongs to the item (its object, flags, the HUD count). Logged in clusters
+namespace {
+constexpr uint32_t kFromVa = 0x81000000, kToVa = 0x84000000, kWords = (kToVa - kFromVa) / 4;
+std::vector<uint32_t> g_a1, g_a2;
+int g_step = 0;
+
+void Snapshot(std::vector<uint32_t>& out) {
+    out.assign(kWords, 0);
+    for (uint32_t page = kFromVa; page < kToVa; page += 0x1000)
+        if (mem::IsCommitted(page) && mem::IsCommitted(page + 0xFFC)) std::memcpy(&out[(page - kFromVa) / 4], HostPtr(page), 0x1000);
+}
+}  // namespace
+
+int FindItemStep(bool advance) {
+    if (!advance) return g_step;
+    if (g_step == 0) {
+        Snapshot(g_a1);
+        g_step = 1;
+    } else if (g_step == 1) {
+        Snapshot(g_a2);
+        g_step = 2;
+    } else {
+        std::vector<uint32_t> b;
+        Snapshot(b);
+        struct Cluster {
+            uint32_t at, count = 0;
+            std::vector<std::pair<uint32_t, uint32_t>> words;
+        };
+        std::vector<Cluster> clusters;
+        uint32_t last = 0;
+        for (uint32_t i = 0; i < kWords; i++) {
+            if (b[i] == g_a2[i] || g_a1[i] != g_a2[i]) continue;
+            uint32_t at = kFromVa + i * 4;
+            if (clusters.empty() || at - last > 0x40) clusters.push_back({at});
+            Cluster& c = clusters.back();
+            c.count++;
+            if (c.words.size() < 8) c.words.push_back({g_a2[i], b[i]});
+            last = at;
+        }
+        LOGR("objects: item diff: %zu clusters", clusters.size());
+        size_t shown = 0;
+        for (Cluster& c : clusters) {
+            if (shown++ >= 400) break;
+            char line[200];
+            int n = std::snprintf(line, sizeof(line), "objects: diff %08X x%u:", c.at, c.count);
+            for (auto& [was, now] : c.words) n += std::snprintf(line + n, sizeof(line) - n, " %08X>%08X", was, now);
+            LOGR("%s", line);
+        }
+        LOGR("objects: item diff done");
+        g_step = 0;
+        g_a1.clear(), g_a2.clear();
+        g_a1.shrink_to_fit(), g_a2.shrink_to_fit();
+    }
+    return g_step;
 }
 
 }  // namespace game
