@@ -1068,16 +1068,10 @@ index 0000000..9b3e4db
 +    __imp__sub_001DFD90(ctx, base);
 +}
 diff --git a/src/game/fps_counter.cpp b/src/game/fps_counter.cpp
-index a8369a1..181d7f2 100644
+index a8369a1..b8c01dd 100644
 --- a/src/game/fps_counter.cpp
 +++ b/src/game/fps_counter.cpp
-@@ -1,4 +1,5 @@
- // Frame rate (top left) and the main menu watermark, drawn by the game in its small font over the finished frame.
-+#include <strings.h>
- #include <algorithm>
- #include <bit>
- #include <cstdio>
-@@ -19,6 +20,10 @@ using flash::kClipNext;
+@@ -19,6 +19,10 @@ using flash::kClipNext;
  using flash::kClipX;
  using flash::kClipY;
  
@@ -1088,33 +1082,7 @@ index a8369a1..181d7f2 100644
  namespace {
  
  // the game's 2D layer: Text(font, wide text, x, y, size, rgba floats), viewport pixels from the top left
-@@ -37,7 +42,7 @@ constexpr float kMargin = 8;
- constexpr float kGrey = 186 / 255.0f;  // the HUD's text
- 
- // as SCDA: at rest it ends 80 in from the right, on the row of the menu's button legend
--constexpr char kWatermark[] = "XBE Recomp V2";
-+constexpr char kWatermark[] = "Black Android";
- constexpr float kWatermarkRight = 80;
- constexpr float kWatermarkTop = 427;
- // the page's Main slides its legend in from the right and back out; x is the confirm prompt's at rest (frame 29)
-@@ -90,14 +95,14 @@ const TitlePage* CurrentTitlePage() {
-     if (!ui) return nullptr;
-     const char* name = static_cast<const char*>(HostPtr(ui + kPageName));
-     for (const TitlePage& page : kTitlePages)
--        if (_strnicmp(name, page.name, std::strlen(page.name)) == 0) return &page;
-+        if (strncasecmp(name, page.name, std::strlen(page.name)) == 0) return &page;
-     return nullptr;
- }
- 
- uint32_t Child(uint32_t clip, const char* name) {
-     int left = 4096;
-     for (uint32_t child = flash::FirstChild(clip); child && left; child = R32(child + kClipNext), left--)
--        if (flash::IsClip(child) && _stricmp(flash::Name(child), name) == 0) return child;
-+        if (flash::IsClip(child) && strcasecmp(flash::Name(child), name) == 0) return child;
-     return 0;
- }
- 
-@@ -135,13 +140,15 @@ void DrawOverlay(X86Context& ctx, uint8_t*) {
+@@ -135,13 +139,15 @@ void DrawOverlay(X86Context& ctx, uint8_t*) {
      const TitlePage* title = CurrentTitlePage();
      std::optional<float> slide = title ? LegendSlide(*title) : std::nullopt;
      bool watermark = slide.has_value();
