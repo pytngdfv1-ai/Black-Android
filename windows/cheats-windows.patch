@@ -1,5 +1,5 @@
 diff --git a/src/common/game_info.cpp b/src/common/game_info.cpp
-index 3cc2bad..b854d1e 100644
+index 3cc2bad..f2bcff5 100644
 --- a/src/common/game_info.cpp
 +++ b/src/common/game_info.cpp
 @@ -35,6 +35,23 @@ HCURSOR WindowCursor() {
@@ -53,7 +53,7 @@ index 3cc2bad..b854d1e 100644
          case WM_KEYDOWN:
          case WM_SYSKEYDOWN:
              if (!(lp & kKeyWasDown) && input::PanelKey(int(wp))) {
-@@ -275,7 +312,19 @@ const app::GameInfo app::kGame = {
+@@ -275,7 +312,21 @@ const app::GameInfo app::kGame = {
                  {"gyro_button", nullptr, &game::Opt().gyro.button},
                  {"gyro_button_mode", nullptr, &game::Opt().gyro.button_mode},
                  {"gyro_recenter_button", nullptr, &game::Opt().gyro.recenter_button},
@@ -61,6 +61,8 @@ index 3cc2bad..b854d1e 100644
 +                {"menu_animations", &game::Opt().menu_animations, nullptr},
 +                {"infinite_ammo", &game::Opt().infinite_ammo, nullptr},
 +                {"rapid_fire", nullptr, &game::Opt().rapid_fire},
++                {"spot_level", nullptr, &game::Opt().spot_level},
++                {"spot_show", nullptr, &game::Opt().spot_show},
 +                {"no_recoil", &game::Opt().no_recoil, nullptr},
 +                {"game_speed", nullptr, &game::Opt().game_speed},
 +                {"god_mode", &game::Opt().god_mode, nullptr},
@@ -75,13 +77,14 @@ index 3cc2bad..b854d1e 100644
      .save = game::Save,
      .init = game::Init,
 diff --git a/src/common/menu.cpp b/src/common/menu.cpp
-index f18e05a..5268ff3 100644
+index f18e05a..2c53995 100644
 --- a/src/common/menu.cpp
 +++ b/src/common/menu.cpp
-@@ -30,6 +30,12 @@
+@@ -30,6 +30,13 @@
  #include "common/mouse_keyboard.h"
  #include "common/options.h"
  #include "common/translations.h"
++#include "game/spots.h"
 +#include "game/weapons.h"
 +
 +namespace game {
@@ -91,18 +94,19 @@ index f18e05a..5268ff3 100644
  
  namespace app {
  
-@@ -239,7 +245,9 @@ enum RowId { kDisplayMode, kResolution, kRenderResolution, kMaxFps, kVsync, kFps
+@@ -239,7 +246,10 @@ enum RowId { kDisplayMode, kResolution, kRenderResolution, kMaxFps, kVsync, kFps
               kGyroAiming, kGyroSensitivity, kAimAssist, kGyroAxis, kGyroButton, kGyroButtonMode, kGyroRecenter,
               kGyroCalibrate, kColourBlind, kSensitivityVertical, kAimHorizontal, kAimVertical, kInvertMouseX,
               kControllerVertical, kPadAimHorizontal, kPadAimVertical, kInvertPadX, kTextureReplacement,
 -             kTextureDumping, kDumpFormat, kDeadZone };
 +             kTextureDumping, kDumpFormat, kDeadZone,
 +             kInfiniteAmmo, kInfiniteGrenades, kRapidFire, kNoRecoil, kGodMode, kOneHitKill, kEsp, kAimbot,
-+             kGameSpeed, kUnlockLevels, kUnlockBlackOps, kLogObjects, kBlood, kMarkerKind, kFindItem };
++             kGameSpeed, kUnlockLevels, kUnlockBlackOps, kLogObjects, kBlood, kMarkerKind, kFindItem,
++             kSpotLevel, kSpotShow, kSpotCounts, kSpotUndo };
  
  using rows::Kind;
  using rows::Row;
-@@ -318,6 +326,29 @@ constexpr Row kControllerRows[] = {
+@@ -318,6 +328,34 @@ constexpr Row kControllerRows[] = {
      {Kind::Value, kGyroCalibrate, "CALIBRATE GYRO"},
  };
  
@@ -123,6 +127,11 @@ index f18e05a..5268ff3 100644
 +    {Kind::Value, kGameSpeed, "GAME SPEED"},
 +    {Kind::Value, kUnlockLevels, "UNLOCK ALL MISSIONS"},
 +    {Kind::Value, kUnlockBlackOps, "UNLOCK BLACK OPS"},
++    {Kind::Heading, -1, "ITEM MARKERS (F6 INTEL, F7 LAPTOP, F8 WEAPON, F9 RECON)"},
++    {Kind::Value, kSpotLevel, "MARKER LEVEL"},
++    {Kind::Value, kSpotShow, "SHOW MARKERS"},
++    {Kind::Value, kSpotCounts, "MARKED IN THIS LEVEL"},
++    {Kind::Value, kSpotUndo, "UNDO LAST MARKER"},
 +    {Kind::Heading, -1, "DEVELOPER"},
 +    {Kind::Value, kLogObjects, "LOG OBJECTS TO THE LOG FILE"},
 +    {Kind::Value, kMarkerKind, "MARK ENTITY TYPE (FIND ITEMS)"},
@@ -132,7 +141,7 @@ index f18e05a..5268ff3 100644
  // the setting an ON / OFF row flips, nullptr for any other row
  bool* ToggleFlag(Settings& s, int id) {
      game::Options& o = game::Opt();
-@@ -339,6 +370,16 @@ bool* ToggleFlag(Settings& s, int id) {
+@@ -339,6 +377,16 @@ bool* ToggleFlag(Settings& s, int id) {
          case kControllerHoldAim: return &o.controller_hold_aim;
          case kGyroAiming: return &o.gyro.enabled;
          case kAimAssist: return &o.aim_assist;
@@ -149,7 +158,7 @@ index f18e05a..5268ff3 100644
          default: return nullptr;
      }
  }
-@@ -505,6 +546,41 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
+@@ -505,6 +553,61 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
      }
  }
  
@@ -167,6 +176,26 @@ index f18e05a..5268ff3 100644
 +            std::snprintf(text, sizeof(text), "%s", kText[state]);
 +            return true;
 +        }
++        case kSpotLevel:
++            if (step) o.spot_level = uint32_t(StepRange(int(o.spot_level), 1, 8, 1, step));
++            std::snprintf(text, sizeof(text), "%u", o.spot_level);
++            return true;
++        case kSpotShow: {
++            static const char* kShow[] = {"OFF", "ALL", "INTEL", "LAPTOPS", "WEAPONS", "RECON"};
++            if (step) o.spot_show = uint32_t(StepRange(int(o.spot_show), 0, 5, 1, step));
++            std::snprintf(text, sizeof(text), "%s", kShow[std::min<uint32_t>(o.spot_show, 5)]);
++            return true;
++        }
++        case kSpotCounts: {
++            int l = int(o.spot_level);
++            std::snprintf(text, sizeof(text), "INTEL %d  LAPTOP %d  WEAPON %d  RECON %d", game::SpotCount(l, 0), game::SpotCount(l, 1),
++                          game::SpotCount(l, 2), game::SpotCount(l, 3));
++            return true;
++        }
++        case kSpotUndo:
++            if (step) game::UndoSpot();
++            std::snprintf(text, sizeof(text), "PRESS");
++            return true;
 +        case kMarkerKind:
 +            if (step) o.marker_kind = uint32_t(StepRange(int(o.marker_kind), 0, 60, 1, step));
 +            if (!o.marker_kind) std::snprintf(text, sizeof(text), "OFF");
@@ -191,7 +220,7 @@ index f18e05a..5268ff3 100644
  // both sensitivity rows: 0.1 to 5.0 in steps of 0.1
  void StepSensitivity(float& value, int step, char (&text)[64]) {
      if (step) {
-@@ -611,7 +687,8 @@ std::string RowText(int id, int step, Settings& s = Get()) {
+@@ -611,7 +714,8 @@ std::string RowText(int id, int step, Settings& s = Get()) {
      if (bool* on = ToggleFlag(s, id)) {
          Flip(*on, step);
          std::snprintf(text, sizeof(text), "%s", OnOff(*on));
@@ -201,7 +230,7 @@ index f18e05a..5268ff3 100644
          StepInputRow(id, step, text);
      }
      if (step && &s == &Get()) Changed(DisplayRow(id));
-@@ -626,10 +703,11 @@ std::string KeyText(std::string keys) {
+@@ -626,10 +730,11 @@ std::string KeyText(std::string keys) {
      return keys;
  }
  
@@ -214,7 +243,7 @@ index f18e05a..5268ff3 100644
  
  // the MOUSE AND KEYBOARD page's values, its binds aside
  void CopyKeyboardValues(game::Options& to, const game::Options& from) {
-@@ -656,8 +734,28 @@ void CopyControllerValues(game::Options& to, const game::Options& from) {
+@@ -656,8 +761,28 @@ void CopyControllerValues(game::Options& to, const game::Options& from) {
      to.gyro = from.gyro;
  }
  
@@ -243,7 +272,7 @@ index f18e05a..5268ff3 100644
      if (page == kControllerPage) {
          CopyControllerValues(o, game::Options{});
          Save();
-@@ -674,6 +772,7 @@ void RestoreDefaults(int page) {
+@@ -674,6 +799,7 @@ void RestoreDefaults(int page) {
      o = game::Options{};
      CopyKeyboardValues(o, keep);
      CopyControllerValues(o, keep);
@@ -251,7 +280,7 @@ index f18e05a..5268ff3 100644
      o.keys = keep.keys;
      Changed(true);
  }
-@@ -804,6 +903,39 @@ void KeyRow(const Row& r) {
+@@ -804,6 +930,39 @@ void KeyRow(const Row& r) {
      g_capture_armed = false;
  }
  
@@ -291,7 +320,7 @@ index f18e05a..5268ff3 100644
  void DrawRows(int page) {
      size_t count = 0;
      const Row* list = rows::Page(page, &count);
-@@ -813,6 +945,7 @@ void DrawRows(int page) {
+@@ -813,6 +972,7 @@ void DrawRows(int page) {
          else if (r.kind == Kind::Value) ValueRow(r);
          else KeyRow(r);
      }
@@ -299,7 +328,7 @@ index f18e05a..5268ff3 100644
  }
  
  void Defaults() {
-@@ -867,6 +1000,7 @@ void DrawFooter(float em) {
+@@ -867,6 +1027,7 @@ void DrawFooter(float em) {
      const char* hint = "";
      if (g_capture >= 0) hint = "Press a key or mouse button to bind, Escape cancels";
      else if (g_page == kKeyboardPage && g_hovered_box >= 0) hint = "Right click or Delete clears the key";
@@ -307,7 +336,7 @@ index f18e05a..5268ff3 100644
      ImGui::TextUnformatted(Ui(hint, false).c_str());
      ImGui::PopStyleColor();
      float bw = em * 8;
-@@ -885,7 +1019,9 @@ void DrawPanel() {
+@@ -885,7 +1046,9 @@ void DrawPanel() {
      const ImGuiViewport* vp = ImGui::GetMainViewport();
      float em = ImGui::GetFontSize();
      ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -318,7 +347,7 @@ index f18e05a..5268ff3 100644
      for (const auto& [col, color] : kPanelColors) ImGui::PushStyleColor(col, color);
      ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
      ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-@@ -919,6 +1055,10 @@ const rows::Row* rows::Page(int page, size_t* count) {
+@@ -919,6 +1082,10 @@ const rows::Row* rows::Page(int page, size_t* count) {
          *count = std::size(kControllerRows);
          return kControllerRows;
      }
@@ -330,15 +359,17 @@ index f18e05a..5268ff3 100644
          std::vector<Row> out(std::begin(kSettingsRows), std::end(kSettingsRows));
          if (!game::HasLanguages()) std::erase_if(out, [](const Row& row) { return row.id == kLanguage; });
 diff --git a/src/common/options.h b/src/common/options.h
-index d2a9adb..59a1553 100644
+index d2a9adb..e1d61aa 100644
 --- a/src/common/options.h
 +++ b/src/common/options.h
-@@ -50,6 +50,20 @@ struct Options {
+@@ -50,6 +50,22 @@ struct Options {
      float controller_dead_zone = 0.0f;  // 0 the game's own kGameDeadZone
      uint32_t rumble_intensity = 100;  // percent of the game's vibration
      gyro::Settings gyro;  // the controller's gyro turns the view, beside the right stick
 +    // cheats (the CHEATS tab of the F10 panel)
 +    bool infinite_ammo = false;  // the player's magazine and reserve never go down
++    uint32_t spot_level = 1;  // personal item markers: the level new spots are saved under
++    uint32_t spot_show = 1;   // 0 none, 1 all, 2 intel, 3 laptops, 4 weapons, 5 recon
 +    uint32_t marker_kind = 0;  // developer: draw a marker on every entity of this type, 0 none (not saved)
 +    uint32_t rapid_fire = 1;  // times the player's rate of fire, 1 the game's
 +    bool no_recoil = false;  // the player's shots do not kick the view
@@ -590,10 +621,10 @@ index 0000000..6c68054
 +}
 diff --git a/src/game/esp.cpp b/src/game/esp.cpp
 new file mode 100644
-index 0000000..9a1e7f8
+index 0000000..5e9b429
 --- /dev/null
 +++ b/src/game/esp.cpp
-@@ -0,0 +1,481 @@
+@@ -0,0 +1,515 @@
 +// The cheats page's ESP LINES: each living enemy gets a box round it and a line to it from the bottom of the screen,
 +// drawn over the finished frame with the view the scene was drawn with. AIMBOT: while the player aims in the view
 +// turns to the body of the living enemy nearest the crosshair
@@ -605,6 +636,7 @@ index 0000000..9a1e7f8
 +
 +#include "common/options.h"
 +#include "game/layout.h"
++#include "game/spots.h"
 +#include "xdk/hle.h"
 +#include "xdk/layout.h"
 +
@@ -1051,12 +1083,50 @@ index 0000000..9a1e7f8
 +    ctx.ecx = ecx;
 +}
 +
++// the saved spots of the level in play: a cross and a line up, by type (intel yellow, laptop red, weapon green, recon blue)
++static void DrawSpots(X86Context& ctx, float unit) {
++    uint32_t show = Opt().spot_show;
++    if (!show) return;
++    uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
++    float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
++    float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
++    static const uint32_t buffer = mem::AllocSystem(kBloodVertices * sizeof(Vertex), 16);
++    static const uint32_t offset = mem::AllocSystem(8, 16);
++    static const uint32_t colours = mem::AllocSystem(kBloodVertices * 4 * sizeof(float), 16);
++    static const float kColour[4][4] = {{1.0f, 0.9f, 0.1f, 1.0f}, {1.0f, 0.15f, 0.1f, 1.0f},
++                                        {0.2f, 1.0f, 0.2f, 1.0f}, {0.3f, 0.6f, 1.0f, 1.0f}};
++    BloodOut o;
++    o.first = o.v = static_cast<Vertex*>(HostPtr(buffer));
++    o.end = o.first + kBloodVertices;
++    o.colour = static_cast<float*>(HostPtr(colours));
++    float width = 2.0f * unit, arm = 9.0f * unit;
++    for (const Spot& s : Spots()) {
++        if (s.level != int(Opt().spot_level) || (show >= 2 && int(show) - 2 != s.type)) continue;
++        float top[3] = {s.pos[0], s.pos[1] + 1.2f, s.pos[2]}, a[2], b[2];
++        if (!Project(s.pos, vx, vy, vw, vh, a) || !Project(top, vx, vy, vw, vh, b)) continue;
++        const float* c = kColour[s.type & 3];
++        BloodQuad(o, a[0], a[1], b[0], b[1], width, c);
++        BloodQuad(o, b[0] - arm, b[1] - arm, b[0] + arm, b[1] + arm, width, c);
++        BloodQuad(o, b[0] - arm, b[1] + arm, b[0] + arm, b[1] - arm, width, c);
++    }
++    if (o.v == o.first) return;
++    W32(offset, 0);
++    W32(offset + 4, 0);
++    uint32_t eax = ctx.eax, ecx = ctx.ecx;
++    ctx.eax = uint32_t(o.v - o.first) / 3;
++    ctx.ecx = buffer;
++    CallGuest(ctx, kTriangles, {offset, colours});
++    ctx.eax = eax;
++    ctx.ecx = ecx;
++}
++
 +// the ESP's lines and the blood, between the 2D layer's begin and end
 +void DrawEsp(X86Context& ctx, float unit) {
 +    if (!g_camera || !R32(kWorld)) return;
 +    if (Opt().esp) DrawLines(ctx, unit);
 +    if (Opt().blood) DrawBlood(ctx, unit);
 +    if (Opt().marker_kind) DrawMarkers(ctx, unit);
++    DrawSpots(ctx, unit);
 +}
 +
 +}  // namespace game
@@ -1066,17 +1136,12 @@ index 0000000..9a1e7f8
 +X86_EXTERN_FUNC(__imp__sub_001DFD90);
 +X86_FUNC(sub_001DFD90) {
 +    uint32_t who = ctx.ecx;
-+    // discovery: a level's objects go to the log once, 15 s after its first enemy runs (they are placed by then)
-+    static std::chrono::steady_clock::time_point since;
-+    static int stage = 0;
-+    if (!R32(kWorld)) stage = 0;
-+    else if (stage == 0 && who && R32(who + kCharKind) == kEnemyKind) stage = 1, since = std::chrono::steady_clock::now(), LOGR("objects: enemy up, dump in 15 s");
-+    else if (stage == 1 && std::chrono::steady_clock::now() - since > std::chrono::seconds(15)) stage = 2, game::DumpObjects();
++    game::PollSpots();  // spots.cpp: F6 to F9 mark the player's place
 +    if ((game::Opt().esp || game::Opt().aimbot) && who && R32(who + kCharKind) == kEnemyKind && !R32(who + kCharDying)) Remember(who);
 +    __imp__sub_001DFD90(ctx, base);
 +}
 diff --git a/src/game/fps_counter.cpp b/src/game/fps_counter.cpp
-index a8369a1..b8c01dd 100644
+index a8369a1..7c0e4a9 100644
 --- a/src/game/fps_counter.cpp
 +++ b/src/game/fps_counter.cpp
 @@ -19,6 +19,10 @@ using flash::kClipNext;
@@ -1095,7 +1160,7 @@ index a8369a1..b8c01dd 100644
      std::optional<float> slide = title ? LegendSlide(*title) : std::nullopt;
      bool watermark = slide.has_value();
 -    if (!(fps || watermark) || !font || !(h > 0)) return;
-+    bool esp = game::Opt().esp || game::Opt().blood || game::Opt().marker_kind;
++    bool esp = game::Opt().esp || game::Opt().blood || game::Opt().marker_kind || game::Opt().spot_show;
 +    if (!(fps || watermark || esp) || !font || !(h > 0)) return;
      View view{h / 480, w / h / game::Aspect()};
      float& width = G<float>(font + kFontScale);
@@ -1432,6 +1497,125 @@ index 0000000..7d49dcd
 +    }
 +    return g_step;
 +}
++
++}  // namespace game
+diff --git a/src/game/spots.cpp b/src/game/spots.cpp
+new file mode 100644
+index 0000000..abdb8bf
+--- /dev/null
++++ b/src/game/spots.cpp
+@@ -0,0 +1,90 @@
++// Personal item markers: on F6 to F9 the player's position is saved as an intel, laptop, weapon or recon spot of the level
++// chosen in the panel, to spots.txt beside the game, and drawn in the level (esp.cpp) from then on
++#include <windows.h>
++
++#include <cstdio>
++#include <filesystem>
++#include <string>
++#include <vector>
++
++#include "core/log.h"
++#include "game/layout.h"
++#include "common/options.h"
++#include "game/spots.h"
++#include "kernel/memory.h"
++
++using namespace kernel;
++
++namespace game {
++namespace {
++
++std::vector<Spot> g_spots;
++bool g_loaded;
++
++std::filesystem::path File() {
++    wchar_t path[MAX_PATH];
++    GetModuleFileNameW(nullptr, path, MAX_PATH);
++    return std::filesystem::path(path).parent_path() / "spots.txt";
++}
++
++void Load() {
++    g_loaded = true;
++    FILE* f = _wfopen(File().c_str(), L"r");
++    if (!f) return;
++    Spot s;
++    while (std::fscanf(f, "%d %d %f %f %f", &s.level, &s.type, &s.pos[0], &s.pos[1], &s.pos[2]) == 5) g_spots.push_back(s);
++    std::fclose(f);
++}
++
++void Save() {
++    FILE* f = _wfopen(File().c_str(), L"w");
++    if (!f) return;
++    for (const Spot& s : g_spots) std::fprintf(f, "%d %d %.3f %.3f %.3f\n", s.level, s.type, s.pos[0], s.pos[1], s.pos[2]);
++    std::fclose(f);
++}
++
++bool GameFocused() {
++    HWND w = GetForegroundWindow();
++    DWORD pid = 0;
++    GetWindowThreadProcessId(w, &pid);
++    return pid == GetCurrentProcessId();
++}
++
++}  // namespace
++
++const std::vector<Spot>& Spots() {
++    if (!g_loaded) Load();
++    return g_spots;
++}
++
++int SpotCount(int level, int type) {
++    int n = 0;
++    for (const Spot& s : Spots()) n += s.level == level && s.type == type;
++    return n;
++}
++
++void UndoSpot() {
++    Spots();
++    if (!g_spots.empty()) g_spots.pop_back(), Save();
++}
++
++// each frame in a level: F6 to F9 mark the player's place
++void PollSpots() {
++    static bool down[4];
++    if (!R32(layout::kWorld) || !GameFocused()) return;
++    for (int k = 0; k < 4; k++) {
++        bool now = GetAsyncKeyState(VK_F6 + k) & 0x8000;
++        if (now && !down[k]) {
++            uint32_t me = R32(layout::kWorld) + layout::kWorldPlayer;
++            Spots();
++            Spot s{int(Opt().spot_level), k, {G<float>(me + 0xA0), G<float>(me + 0xA4), G<float>(me + 0xA8)}};
++            g_spots.push_back(s);
++            Save();
++            MessageBeep(MB_OK);
++            LOGR("spots: level %d type %d at %.2f %.2f %.2f", s.level, s.type, s.pos[0], s.pos[1], s.pos[2]);
++        }
++        down[k] = now;
++    }
++}
++
++}  // namespace game
+diff --git a/src/game/spots.h b/src/game/spots.h
+new file mode 100644
+index 0000000..85f5c21
+--- /dev/null
++++ b/src/game/spots.h
+@@ -0,0 +1,17 @@
++#pragma once
++#include <vector>
++
++namespace game {
++
++// types: 0 intel, 1 laptop, 2 weapon, 3 recon
++struct Spot {
++    int level, type;
++    float pos[3];
++};
++
++const std::vector<Spot>& Spots();
++int SpotCount(int level, int type);
++void UndoSpot();
++void PollSpots();
 +
 +}  // namespace game
 diff --git a/src/game/weapons.cpp b/src/game/weapons.cpp
