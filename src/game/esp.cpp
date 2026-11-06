@@ -122,8 +122,8 @@ constexpr size_t kBloodVertices = kSpurts * 1800;
 constexpr float kBloodLife = 1.6f;               // seconds a splat stays
 constexpr float kDropLife = 0.9f;                // seconds the drops fly
 constexpr float kBloodThickness = 1.5f;          // of a 480 frame
-constexpr float kBloodColours[4][4] = {{0.30f, 0.0f, 0.0f, 1.0f}, {0.20f, 0.0f, 0.0f, 1.0f},
-                                       {0.45f, 0.01f, 0.01f, 1.0f}, {0.12f, 0.0f, 0.0f, 1.0f}};
+constexpr float kBloodColours[4][4] = {{0.20f, 0.0f, 0.0f, 1.0f}, {0.13f, 0.0f, 0.0f, 1.0f},
+                                       {0.28f, 0.0f, 0.0f, 1.0f}, {0.08f, 0.0f, 0.0f, 1.0f}};
 constexpr float kPi2 = 6.2831853f;
 
 struct Spurt {
@@ -326,10 +326,10 @@ static void DrawBlood(X86Context& ctx, float unit) {
         // per style: splat radius in metres, spike share, satellites, streaks, round drops, drips
         static const float kRadius[3] = {0.28f, 0.18f, 0.42f};
         static const float kSpiky[3] = {0.55f, 0.25f, 0.15f};
-        static const int kSatellites[3] = {10, 6, 14};
-        static const int kStreaks[3] = {44, 80, 20};
-        static const int kRound[3] = {28, 36, 20};
-        static const int kDrips[3] = {0, 0, 8};
+        static const int kSatellites[3] = {5, 3, 7};
+        static const int kStreaks[3] = {22, 40, 10};
+        static const int kRound[3] = {14, 18, 10};
+        static const int kDrips[3] = {0, 0, 4};
         // the splat, its satellites and drips
         if (seen && ppm > 0 && scale > 0) {
             float r = std::min(ppm * kRadius[style], vh * 0.08f) * scale;  // capped: close up it would fill the screen
