@@ -1501,12 +1501,15 @@ index 0000000..7d49dcd
 +}  // namespace game
 diff --git a/src/game/spots.cpp b/src/game/spots.cpp
 new file mode 100644
-index 0000000..abdb8bf
+index 0000000..83930fe
 --- /dev/null
 +++ b/src/game/spots.cpp
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,93 @@
 +// Personal item markers: on F6 to F9 the player's position is saved as an intel, laptop, weapon or recon spot of the level
 +// chosen in the panel, to spots.txt beside the game, and drawn in the level (esp.cpp) from then on
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
 +#include <windows.h>
 +
 +#include <cstdio>
