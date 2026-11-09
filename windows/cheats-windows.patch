@@ -78,7 +78,7 @@ index 3cc2bad..0e54223 100644
      .save = game::Save,
      .init = game::Init,
 diff --git a/src/common/menu.cpp b/src/common/menu.cpp
-index f18e05a..0ab9db1 100644
+index f18e05a..9e3c20c 100644
 --- a/src/common/menu.cpp
 +++ b/src/common/menu.cpp
 @@ -30,6 +30,14 @@
@@ -132,7 +132,7 @@ index f18e05a..0ab9db1 100644
 +    {Kind::Heading, -1, "MINIMAP (DRAWS ITSELF AS YOU PLAY; USES THE MARKER LEVEL)"},
 +    {Kind::Value, kMapShow, "MINIMAP"},
 +    {Kind::Value, kMapClear, "ERASE THIS LEVEL'S MAP"},
-+    {Kind::Heading, -1, "ITEM MARKERS (F6 INTEL, F7 LAPTOP, F8 WEAPON, F9 RECON)"},
++    {Kind::Heading, -1, "ITEM MARKERS (F6 INTEL, F7 LAPTOP, F8 WEAPON, F9 RECON, F5 DESTROY)"},
 +    {Kind::Value, kSpotLevel, "MARKER LEVEL"},
 +    {Kind::Value, kSpotShow, "SHOW MARKERS"},
 +    {Kind::Value, kSpotCounts, "MARKED IN THIS LEVEL"},
@@ -194,15 +194,15 @@ index f18e05a..0ab9db1 100644
 +            std::snprintf(text, sizeof(text), "%u", o.spot_level);
 +            return true;
 +        case kSpotShow: {
-+            static const char* kShow[] = {"OFF", "ALL", "INTEL", "LAPTOPS", "WEAPONS", "RECON"};
-+            if (step) o.spot_show = uint32_t(StepRange(int(o.spot_show), 0, 5, 1, step));
-+            std::snprintf(text, sizeof(text), "%s", kShow[std::min<uint32_t>(o.spot_show, 5)]);
++            static const char* kShow[] = {"OFF", "ALL", "INTEL", "LAPTOPS", "WEAPONS", "RECON", "DESTROY"};
++            if (step) o.spot_show = uint32_t(StepRange(int(o.spot_show), 0, 6, 1, step));
++            std::snprintf(text, sizeof(text), "%s", kShow[std::min<uint32_t>(o.spot_show, 6)]);
 +            return true;
 +        }
 +        case kSpotCounts: {
 +            int l = int(o.spot_level);
-+            std::snprintf(text, sizeof(text), "INTEL %d  LAPTOP %d  WEAPON %d  RECON %d", game::SpotCount(l, 0), game::SpotCount(l, 1),
-+                          game::SpotCount(l, 2), game::SpotCount(l, 3));
++            std::snprintf(text, sizeof(text), "INTEL %d LAPTOP %d WEAPON %d RECON %d DESTROY %d", game::SpotCount(l, 0), game::SpotCount(l, 1),
++                          game::SpotCount(l, 2), game::SpotCount(l, 3), game::SpotCount(l, 4));
 +            return true;
 +        }
 +        case kSpotUndo:
@@ -635,10 +635,10 @@ index 0000000..6c68054
 +}
 diff --git a/src/game/esp.cpp b/src/game/esp.cpp
 new file mode 100644
-index 0000000..4714ef0
+index 0000000..f3950cd
 --- /dev/null
 +++ b/src/game/esp.cpp
-@@ -0,0 +1,595 @@
+@@ -0,0 +1,596 @@
 +// The cheats page's ESP LINES: each living enemy gets a box round it and a line to it from the bottom of the screen,
 +// drawn over the finished frame with the view the scene was drawn with. AIMBOT: while the player aims in the view
 +// turns to the body of the living enemy nearest the crosshair
@@ -1108,8 +1108,8 @@ index 0000000..4714ef0
 +    static const uint32_t buffer = mem::AllocSystem(kBloodVertices * sizeof(Vertex), 16);
 +    static const uint32_t offset = mem::AllocSystem(8, 16);
 +    static const uint32_t colours = mem::AllocSystem(kBloodVertices * 4 * sizeof(float), 16);
-+    static const float kColour[4][4] = {{1.0f, 0.9f, 0.1f, 1.0f}, {1.0f, 0.15f, 0.1f, 1.0f},
-+                                        {0.2f, 1.0f, 0.2f, 1.0f}, {0.3f, 0.6f, 1.0f, 1.0f}};
++    static const float kColour[5][4] = {{1.0f, 0.9f, 0.1f, 1.0f}, {1.0f, 0.15f, 0.1f, 1.0f}, {0.2f, 1.0f, 0.2f, 1.0f},
++                                        {0.3f, 0.6f, 1.0f, 1.0f}, {1.0f, 0.5f, 0.0f, 1.0f}};
 +    BloodOut o;
 +    o.first = o.v = static_cast<Vertex*>(HostPtr(buffer));
 +    o.end = o.first + kBloodVertices;
@@ -1119,7 +1119,7 @@ index 0000000..4714ef0
 +        if (s.level != int(Opt().spot_level) || (show >= 2 && int(show) - 2 != s.type)) continue;
 +        float top[3] = {s.pos[0], s.pos[1] + 1.2f, s.pos[2]}, a[2], b[2];
 +        if (!Project(s.pos, vx, vy, vw, vh, a) || !Project(top, vx, vy, vw, vh, b)) continue;
-+        const float* c = kColour[s.type & 3];
++        const float* c = kColour[std::min(s.type, 4)];
 +        BloodQuad(o, a[0], a[1], b[0], b[1], width, c);
 +        BloodQuad(o, b[0] - arm, b[1] - arm, b[0] + arm, b[1] + arm, width, c);
 +        BloodQuad(o, b[0] - arm, b[1] + arm, b[0] + arm, b[1] - arm, width, c);
@@ -1152,7 +1152,7 @@ index 0000000..4714ef0
 +    uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
 +    float vx = float(R32(viewport)), vy = float(R32(viewport + 4)), vw = float(R32(viewport + 8));
 +    constexpr float kRange = 40.0f;  // metres from the player to the map's edge
-+    float half = 80.0f * unit, scale = half / kRange;
++    float half = 105.0f * unit, scale = half / kRange;
 +    float cx = vx + vw - half - 14.0f * unit, cy = vy + half + 44.0f * unit;
 +    static const uint32_t buffer = mem::AllocSystem(kBloodVertices * 2 * sizeof(Vertex), 16);
 +    static const uint32_t offset = mem::AllocSystem(8, 16);
@@ -1161,9 +1161,10 @@ index 0000000..4714ef0
 +    o.first = o.v = static_cast<Vertex*>(HostPtr(buffer));
 +    o.end = o.first + kBloodVertices * 2;
 +    o.colour = static_cast<float*>(HostPtr(colours));
-+    static const float back[4] = {0.0f, 0.0f, 0.0f, 0.45f}, ground[4] = {0.55f, 0.62f, 0.7f, 0.9f};
++    static const float back[4] = {0.0f, 0.0f, 0.0f, 0.2f}, ground[4] = {0.6f, 0.7f, 0.8f, 0.45f};
 +    static const float self[4] = {1.0f, 1.0f, 1.0f, 1.0f}, foe[4] = {1.0f, 0.1f, 0.1f, 1.0f};
-+    static const float kSpot[4][4] = {{1.0f, 0.9f, 0.1f, 1.0f}, {1.0f, 0.15f, 0.1f, 1.0f}, {0.2f, 1.0f, 0.2f, 1.0f}, {0.3f, 0.6f, 1.0f, 1.0f}};
++    static const float kSpot[5][4] = {{1.0f, 0.9f, 0.1f, 1.0f}, {1.0f, 0.15f, 0.1f, 1.0f}, {0.2f, 1.0f, 0.2f, 1.0f},
++                                      {0.3f, 0.6f, 1.0f, 1.0f}, {1.0f, 0.5f, 0.0f, 1.0f}};
 +    BloodTri(o, cx - half, cy - half, cx + half, cy - half, cx - half, cy + half, back);
 +    BloodTri(o, cx + half, cy - half, cx + half, cy + half, cx - half, cy + half, back);
 +    // a point on the ground as (right, ahead) metres from the player, to the map's pixels
@@ -1188,8 +1189,8 @@ index 0000000..4714ef0
 +        float px, py;
 +        if (s.level != level || !Place(s.pos[0], s.pos[2], px, py)) continue;
 +        float r = 3.0f * unit;
-+        BloodTri(o, px - r, py - r, px + r, py - r, px - r, py + r, kSpot[s.type & 3]);
-+        BloodTri(o, px + r, py - r, px + r, py + r, px - r, py + r, kSpot[s.type & 3]);
++        BloodTri(o, px - r, py - r, px + r, py - r, px - r, py + r, kSpot[std::min(s.type, 4)]);
++        BloodTri(o, px + r, py - r, px + r, py + r, px - r, py + r, kSpot[std::min(s.type, 4)]);
 +    }
 +    auto now = std::chrono::steady_clock::now();
 +    for (size_t i = 0; i < g_count; i++) {
@@ -1715,7 +1716,7 @@ index 0000000..7d49dcd
 +}  // namespace game
 diff --git a/src/game/spots.cpp b/src/game/spots.cpp
 new file mode 100644
-index 0000000..83930fe
+index 0000000..66e0784
 --- /dev/null
 +++ b/src/game/spots.cpp
 @@ -0,0 +1,93 @@
@@ -1794,10 +1795,10 @@ index 0000000..83930fe
 +
 +// each frame in a level: F6 to F9 mark the player's place
 +void PollSpots() {
-+    static bool down[4];
++    static bool down[5];
 +    if (!R32(layout::kWorld) || !GameFocused()) return;
-+    for (int k = 0; k < 4; k++) {
-+        bool now = GetAsyncKeyState(VK_F6 + k) & 0x8000;
++    for (int k = 0; k < 5; k++) {
++        bool now = GetAsyncKeyState(k < 4 ? VK_F6 + k : VK_F5) & 0x8000;  // the fifth, destruction targets, on F5
 +        if (now && !down[k]) {
 +            uint32_t me = R32(layout::kWorld) + layout::kWorldPlayer;
 +            Spots();
@@ -1814,7 +1815,7 @@ index 0000000..83930fe
 +}  // namespace game
 diff --git a/src/game/spots.h b/src/game/spots.h
 new file mode 100644
-index 0000000..85f5c21
+index 0000000..69a66c1
 --- /dev/null
 +++ b/src/game/spots.h
 @@ -0,0 +1,17 @@
@@ -1823,7 +1824,7 @@ index 0000000..85f5c21
 +
 +namespace game {
 +
-+// types: 0 intel, 1 laptop, 2 weapon, 3 recon
++// types: 0 intel, 1 laptop, 2 weapon, 3 recon, 4 destruction target
 +struct Spot {
 +    int level, type;
 +    float pos[3];
