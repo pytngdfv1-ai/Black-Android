@@ -1,5 +1,5 @@
 diff --git a/src/common/game_info.cpp b/src/common/game_info.cpp
-index 3cc2bad..af51ca9 100644
+index 3cc2bad..d10ae89 100644
 --- a/src/common/game_info.cpp
 +++ b/src/common/game_info.cpp
 @@ -35,6 +35,23 @@ HCURSOR WindowCursor() {
@@ -53,7 +53,7 @@ index 3cc2bad..af51ca9 100644
          case WM_KEYDOWN:
          case WM_SYSKEYDOWN:
              if (!(lp & kKeyWasDown) && input::PanelKey(int(wp))) {
-@@ -275,7 +312,21 @@ const app::GameInfo app::kGame = {
+@@ -275,7 +312,18 @@ const app::GameInfo app::kGame = {
                  {"gyro_button", nullptr, &game::Opt().gyro.button},
                  {"gyro_button_mode", nullptr, &game::Opt().gyro.button_mode},
                  {"gyro_recenter_button", nullptr, &game::Opt().gyro.recenter_button},
@@ -61,8 +61,6 @@ index 3cc2bad..af51ca9 100644
 +                {"menu_animations", &game::Opt().menu_animations, nullptr},
 +                {"infinite_ammo", &game::Opt().infinite_ammo, nullptr},
 +                {"rapid_fire", nullptr, &game::Opt().rapid_fire},
-+                {"spot_level", nullptr, &game::Opt().spot_level},
-+                {"map_show", nullptr, &game::Opt().map_show},
 +                {"no_recoil", &game::Opt().no_recoil, nullptr},
 +                {"game_speed", nullptr, &game::Opt().game_speed},
 +                {"god_mode", &game::Opt().god_mode, nullptr},
@@ -71,20 +69,18 @@ index 3cc2bad..af51ca9 100644
 +                {"unlock_levels", &game::Opt().unlock_levels, nullptr},
 +                {"unlock_black_ops", &game::Opt().unlock_black_ops, nullptr},
 +                {"esp", &game::Opt().esp, nullptr},
-+                {"blood", &game::Opt().blood, nullptr},
 +                {"aimbot", &game::Opt().aimbot, nullptr}},
      .load = game::Load,
      .save = game::Save,
      .init = game::Init,
 diff --git a/src/common/menu.cpp b/src/common/menu.cpp
-index f18e05a..d4ebd37 100644
+index f18e05a..86f450d 100644
 --- a/src/common/menu.cpp
 +++ b/src/common/menu.cpp
-@@ -30,6 +30,11 @@
+@@ -30,6 +30,10 @@
  #include "common/mouse_keyboard.h"
  #include "common/options.h"
  #include "common/translations.h"
-+#include "game/map.h"
 +#include "game/weapons.h"
 +
 +namespace game {
@@ -92,19 +88,18 @@ index f18e05a..d4ebd37 100644
  
  namespace app {
  
-@@ -239,7 +244,10 @@ enum RowId { kDisplayMode, kResolution, kRenderResolution, kMaxFps, kVsync, kFps
+@@ -239,7 +243,9 @@ enum RowId { kDisplayMode, kResolution, kRenderResolution, kMaxFps, kVsync, kFps
               kGyroAiming, kGyroSensitivity, kAimAssist, kGyroAxis, kGyroButton, kGyroButtonMode, kGyroRecenter,
               kGyroCalibrate, kColourBlind, kSensitivityVertical, kAimHorizontal, kAimVertical, kInvertMouseX,
               kControllerVertical, kPadAimHorizontal, kPadAimVertical, kInvertPadX, kTextureReplacement,
 -             kTextureDumping, kDumpFormat, kDeadZone };
 +             kTextureDumping, kDumpFormat, kDeadZone,
 +             kInfiniteAmmo, kInfiniteGrenades, kRapidFire, kNoRecoil, kGodMode, kOneHitKill, kEsp, kAimbot,
-+             kGameSpeed, kUnlockLevels, kUnlockBlackOps, kBlood, 
-+             kSpotLevel, kMapShow, kMapClear };
++             kGameSpeed, kUnlockLevels, kUnlockBlackOps, };
  
  using rows::Kind;
  using rows::Row;
-@@ -318,6 +326,29 @@ constexpr Row kControllerRows[] = {
+@@ -318,6 +324,24 @@ constexpr Row kControllerRows[] = {
      {Kind::Value, kGyroCalibrate, "CALIBRATE GYRO"},
  };
  
@@ -119,22 +114,17 @@ index f18e05a..d4ebd37 100644
 +    {Kind::Value, kGodMode, "GOD MODE"},
 +    {Kind::Value, kOneHitKill, "ONE-HIT KILL"},
 +    {Kind::Value, kEsp, "ESP LINES"},
-+    {Kind::Value, kBlood, "BLOOD"},
 +    {Kind::Value, kAimbot, "AIMBOT (WHILE AIMING IN)"},  // esp.cpp turns the view only at a zoom above 1
 +    {Kind::Heading, -1, "GAME"},
 +    {Kind::Value, kGameSpeed, "GAME SPEED"},
 +    {Kind::Value, kUnlockLevels, "UNLOCK ALL MISSIONS"},
 +    {Kind::Value, kUnlockBlackOps, "UNLOCK BLACK OPS"},
-+    {Kind::Heading, -1, "MINIMAP (DRAWS ITSELF AS YOU PLAY)"},
-+    {Kind::Value, kMapShow, "MINIMAP"},
-+    {Kind::Value, kMapClear, "ERASE THIS LEVEL'S MAP"},
-+    {Kind::Value, kSpotLevel, "MAP LEVEL"},
 +};
 +
  // the setting an ON / OFF row flips, nullptr for any other row
  bool* ToggleFlag(Settings& s, int id) {
      game::Options& o = game::Opt();
-@@ -339,6 +370,16 @@ bool* ToggleFlag(Settings& s, int id) {
+@@ -339,6 +363,15 @@ bool* ToggleFlag(Settings& s, int id) {
          case kControllerHoldAim: return &o.controller_hold_aim;
          case kGyroAiming: return &o.gyro.enabled;
          case kAimAssist: return &o.aim_assist;
@@ -146,12 +136,11 @@ index f18e05a..d4ebd37 100644
 +        case kUnlockLevels: return &o.unlock_levels;
 +        case kUnlockBlackOps: return &o.unlock_black_ops;
 +        case kEsp: return &o.esp;
-+        case kBlood: return &o.blood;
 +        case kAimbot: return &o.aimbot;
          default: return nullptr;
      }
  }
-@@ -505,6 +546,38 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
+@@ -505,6 +538,26 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
      }
  }
  
@@ -159,18 +148,6 @@ index f18e05a..d4ebd37 100644
 +bool StepCheatRow(int id, int step, char (&text)[64]) {
 +    game::Options& o = game::Opt();
 +    switch (id) {
-+        case kMapShow:
-+            if (step) o.map_show = o.map_show ? 0 : 1;
-+            std::snprintf(text, sizeof(text), "%s", o.map_show ? "ON" : "OFF");
-+            return true;
-+        case kMapClear:
-+            if (step) game::MapClear(int(o.spot_level));
-+            std::snprintf(text, sizeof(text), "PRESS");
-+            return true;
-+        case kSpotLevel:
-+            if (step) o.spot_level = uint32_t(StepRange(int(o.spot_level), 1, 8, 1, step));
-+            std::snprintf(text, sizeof(text), "%u", o.spot_level);
-+            return true;
 +        case kRapidFire:
 +            // off, then 2 to 4 times the rate
 +            if (step) o.rapid_fire = uint32_t(StepRange(int(o.rapid_fire), 1, 4, 1, step));
@@ -190,7 +167,7 @@ index f18e05a..d4ebd37 100644
  // both sensitivity rows: 0.1 to 5.0 in steps of 0.1
  void StepSensitivity(float& value, int step, char (&text)[64]) {
      if (step) {
-@@ -611,7 +684,8 @@ std::string RowText(int id, int step, Settings& s = Get()) {
+@@ -611,7 +664,8 @@ std::string RowText(int id, int step, Settings& s = Get()) {
      if (bool* on = ToggleFlag(s, id)) {
          Flip(*on, step);
          std::snprintf(text, sizeof(text), "%s", OnOff(*on));
@@ -200,7 +177,7 @@ index f18e05a..d4ebd37 100644
          StepInputRow(id, step, text);
      }
      if (step && &s == &Get()) Changed(DisplayRow(id));
-@@ -626,10 +700,11 @@ std::string KeyText(std::string keys) {
+@@ -626,10 +680,11 @@ std::string KeyText(std::string keys) {
      return keys;
  }
  
@@ -213,7 +190,7 @@ index f18e05a..d4ebd37 100644
  
  // the MOUSE AND KEYBOARD page's values, its binds aside
  void CopyKeyboardValues(game::Options& to, const game::Options& from) {
-@@ -656,8 +731,28 @@ void CopyControllerValues(game::Options& to, const game::Options& from) {
+@@ -656,8 +711,27 @@ void CopyControllerValues(game::Options& to, const game::Options& from) {
      to.gyro = from.gyro;
  }
  
@@ -228,7 +205,6 @@ index f18e05a..d4ebd37 100644
 +    to.unlock_levels = from.unlock_levels;
 +    to.unlock_black_ops = from.unlock_black_ops;
 +    to.esp = from.esp;
-+    to.blood = from.blood;
 +    to.aimbot = from.aimbot;
 +}
 +
@@ -242,7 +218,7 @@ index f18e05a..d4ebd37 100644
      if (page == kControllerPage) {
          CopyControllerValues(o, game::Options{});
          Save();
-@@ -674,6 +769,7 @@ void RestoreDefaults(int page) {
+@@ -674,6 +748,7 @@ void RestoreDefaults(int page) {
      o = game::Options{};
      CopyKeyboardValues(o, keep);
      CopyControllerValues(o, keep);
@@ -250,7 +226,7 @@ index f18e05a..d4ebd37 100644
      o.keys = keep.keys;
      Changed(true);
  }
-@@ -804,6 +900,39 @@ void KeyRow(const Row& r) {
+@@ -804,6 +879,39 @@ void KeyRow(const Row& r) {
      g_capture_armed = false;
  }
  
@@ -290,7 +266,7 @@ index f18e05a..d4ebd37 100644
  void DrawRows(int page) {
      size_t count = 0;
      const Row* list = rows::Page(page, &count);
-@@ -813,6 +942,7 @@ void DrawRows(int page) {
+@@ -813,6 +921,7 @@ void DrawRows(int page) {
          else if (r.kind == Kind::Value) ValueRow(r);
          else KeyRow(r);
      }
@@ -298,7 +274,7 @@ index f18e05a..d4ebd37 100644
  }
  
  void Defaults() {
-@@ -867,6 +997,7 @@ void DrawFooter(float em) {
+@@ -867,6 +976,7 @@ void DrawFooter(float em) {
      const char* hint = "";
      if (g_capture >= 0) hint = "Press a key or mouse button to bind, Escape cancels";
      else if (g_page == kKeyboardPage && g_hovered_box >= 0) hint = "Right click or Delete clears the key";
@@ -306,7 +282,7 @@ index f18e05a..d4ebd37 100644
      ImGui::TextUnformatted(Ui(hint, false).c_str());
      ImGui::PopStyleColor();
      float bw = em * 8;
-@@ -885,7 +1016,9 @@ void DrawPanel() {
+@@ -885,7 +995,9 @@ void DrawPanel() {
      const ImGuiViewport* vp = ImGui::GetMainViewport();
      float em = ImGui::GetFontSize();
      ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -317,7 +293,7 @@ index f18e05a..d4ebd37 100644
      for (const auto& [col, color] : kPanelColors) ImGui::PushStyleColor(col, color);
      ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
      ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-@@ -919,6 +1052,10 @@ const rows::Row* rows::Page(int page, size_t* count) {
+@@ -919,6 +1031,10 @@ const rows::Row* rows::Page(int page, size_t* count) {
          *count = std::size(kControllerRows);
          return kControllerRows;
      }
@@ -329,17 +305,15 @@ index f18e05a..d4ebd37 100644
          std::vector<Row> out(std::begin(kSettingsRows), std::end(kSettingsRows));
          if (!game::HasLanguages()) std::erase_if(out, [](const Row& row) { return row.id == kLanguage; });
 diff --git a/src/common/options.h b/src/common/options.h
-index d2a9adb..c1e0967 100644
+index d2a9adb..af5d397 100644
 --- a/src/common/options.h
 +++ b/src/common/options.h
-@@ -50,6 +50,21 @@ struct Options {
+@@ -50,6 +50,18 @@ struct Options {
      float controller_dead_zone = 0.0f;  // 0 the game's own kGameDeadZone
      uint32_t rumble_intensity = 100;  // percent of the game's vibration
      gyro::Settings gyro;  // the controller's gyro turns the view, beside the right stick
 +    // cheats (the CHEATS tab of the F10 panel)
 +    bool infinite_ammo = false;  // the player's magazine and reserve never go down
-+    uint32_t map_show = 1;    // the minimap that draws itself as the level is played: 0 off, 1 on
-+    uint32_t spot_level = 1;  // personal item markers: the level new spots are saved under
 +    uint32_t rapid_fire = 1;  // times the player's rate of fire, 1 the game's
 +    bool no_recoil = false;  // the player's shots do not kick the view
 +    uint32_t game_speed = 100;  // percent of the game's speed, menus and films keep theirs
@@ -349,17 +323,16 @@ index d2a9adb..c1e0967 100644
 +    bool unlock_levels = false;  // every mission open on every difficulty, the save is left as it is
 +    bool unlock_black_ops = false;  // Black Ops open on the missions open on another difficulty, the same
 +    bool esp = false;  // a line from the bottom of the screen and a box to each living enemy
-+    bool blood = false;  // a hit on an enemy sprays blood (the game has none)
 +    bool aimbot = false;  // aiming in turns the view to the body of the enemy nearest the crosshair
      bool menu_animations = true;  // off: menu pages and the pause menu change without sliding in and out
      std::map<std::string, std::string> keys;  // action id to key names, absent is the default
  };
 diff --git a/src/game/cheats.cpp b/src/game/cheats.cpp
 new file mode 100644
-index 0000000..1ec0966
+index 0000000..4b5e045
 --- /dev/null
 +++ b/src/game/cheats.cpp
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,103 @@
 +// The cheats page's god mode, one-hit kill and infinite grenades. The rest live where the game
 +// already has a hook: infinite ammo, rapid fire and no recoil with the weapon's, game speed with the frame time
 +#include <algorithm>
@@ -372,7 +345,6 @@ index 0000000..1ec0966
 +using namespace layout;
 +
 +namespace game {
-+void BloodSpurt(uint32_t victim);  // esp.cpp
 +}
 +
 +namespace {
@@ -448,14 +420,9 @@ index 0000000..1ec0966
 +X86_EXTERN_FUNC(__imp__sub_001E74B0);
 +X86_FUNC(sub_001E74B0) {
 +    uint32_t victim = ctx.ecx;
-+    float health = G<float>(victim + kCharHealth);
-+    bool dying = R32(victim + kCharDying) != 0;
 +    Doomed doomed = Doom(victim, R32(ctx.esp + 0x18));
 +    __imp__sub_001E74B0(ctx, base);
 +    Spare(doomed);
-+    // the blood cheat: the bullet took health or killed
-+    bool hurt = G<float>(victim + kCharHealth) < health || (!dying && R32(victim + kCharDying));
-+    if (hurt && victim != Player()) game::BloodSpurt(victim);
 +}
 +
 +// A character's animation event (64-bit hash, then a pointer to the character): the throw takes a grenade
@@ -590,10 +557,10 @@ index 0000000..6c68054
 +}
 diff --git a/src/game/esp.cpp b/src/game/esp.cpp
 new file mode 100644
-index 0000000..8672d9b
+index 0000000..bdaae67
 --- /dev/null
 +++ b/src/game/esp.cpp
-@@ -0,0 +1,493 @@
+@@ -0,0 +1,216 @@
 +// The cheats page's ESP LINES: each living enemy gets a box round it and a line to it from the bottom of the screen,
 +// drawn over the finished frame with the view the scene was drawn with. AIMBOT: while the player aims in the view
 +// turns to the body of the living enemy nearest the crosshair
@@ -605,7 +572,6 @@ index 0000000..8672d9b
 +
 +#include "common/options.h"
 +#include "game/layout.h"
-+#include "game/map.h"
 +#include "xdk/hle.h"
 +#include "xdk/layout.h"
 +
@@ -711,33 +677,6 @@ index 0000000..8672d9b
 +    return v;
 +}
 +
-+// BLOOD: Black has none, so a hit on an enemy splatters: a splat on the screen at the hit, flying streaks and round
-+// drops thrown from it that fall under gravity (projected with the scene's view), and drips. Three styles, picked by the
-+// hit: a burst with spikes, a directional spray, a big blob with drips. Drawn in the 2D layer like the ESP
-+constexpr size_t kSpurts = 8;                    // hits shown at once
-+constexpr size_t kBloodVertices = kSpurts * 1800;
-+constexpr float kBloodLife = 1.6f;               // seconds a splat stays
-+constexpr float kDropLife = 0.9f;                // seconds the drops fly
-+constexpr float kBloodThickness = 1.5f;          // of a 480 frame
-+constexpr float kBloodColours[4][4] = {{0.20f, 0.0f, 0.0f, 1.0f}, {0.13f, 0.0f, 0.0f, 1.0f},
-+                                       {0.28f, 0.0f, 0.0f, 1.0f}, {0.08f, 0.0f, 0.0f, 1.0f}};
-+constexpr float kPi2 = 6.2831853f;
-+
-+struct Spurt {
-+    bool live = false;
-+    float at[3];
-+    float away[2];  // along the ground, from the player to the enemy
-+    uint32_t seed;
-+    std::chrono::steady_clock::time_point when;
-+};
-+Spurt g_spurts[kSpurts];
-+size_t g_next_spurt;
-+
-+float Random(uint32_t& seed) {
-+    seed = seed * 1664525u + 1013904223u;
-+    return float(seed >> 8) / float(1 << 24);
-+}
-+
 +}  // namespace
 +
 +namespace game {
@@ -822,259 +761,10 @@ index 0000000..8672d9b
 +    ctx.ecx = ecx;
 +}
 +
-+// a hit on the enemy: the blood starts from its chest
-+void BloodSpurt(uint32_t victim) {
-+    if (!Opt().blood) return;
-+    const float* at = &G<float>(victim + kCharPosition);
-+    Spurt& s = g_spurts[g_next_spurt++ % kSpurts];
-+    s.at[0] = at[0];
-+    s.at[1] = at[1] + kChest;
-+    s.at[2] = at[2];
-+    s.away[0] = s.away[1] = 0;
-+    if (uint32_t me = R32(kWorld) ? R32(kWorld) + kWorldPlayer : 0) {
-+        const float* from = &G<float>(me + kCharPosition);
-+        float dx = at[0] - from[0], dz = at[2] - from[2];
-+        float length = std::sqrt(dx * dx + dz * dz);
-+        if (length > 0.01f) s.away[0] = dx / length, s.away[1] = dz / length;
-+    }
-+    s.when = std::chrono::steady_clock::now();
-+    s.seed = uint32_t(s.when.time_since_epoch().count()) ^ victim;
-+    s.live = true;
-+}
-+
-+struct BloodOut {
-+    Vertex* v;
-+    Vertex* end;
-+    float* colour;  // a colour a vertex, in step with v
-+    Vertex* first;
-+};
-+
-+static void BloodTri(BloodOut& o, float x0, float y0, float x1, float y1, float x2, float y2, const float* c) {
-+    if (o.v + 3 > o.end) return;
-+    const float p[3][2] = {{x0, y0}, {x1, y1}, {x2, y2}};
-+    for (int i = 0; i < 3; i++) {
-+        *o.v = {p[i][0], p[i][1]};
-+        std::memcpy(o.colour + (o.v - o.first) * 4, c, 4 * sizeof(float));
-+        o.v++;
-+    }
-+}
-+
-+static void BloodQuad(BloodOut& o, float x0, float y0, float x1, float y1, float width, const float* c) {
-+    float dx = x1 - x0, dy = y1 - y0, length = std::sqrt(dx * dx + dy * dy);
-+    if (!(length > 0)) return;
-+    float nx = -dy / length * width * 0.5f, ny = dx / length * width * 0.5f;
-+    BloodTri(o, x0 + nx, y0 + ny, x0 - nx, y0 - ny, x1 + nx, y1 + ny, c);
-+    BloodTri(o, x1 + nx, y1 + ny, x0 - nx, y0 - ny, x1 - nx, y1 - ny, c);
-+}
-+
-+// an irregular blob round (cx, cy); spiky pushes some points far out
-+static void BloodBlob(BloodOut& o, float cx, float cy, float r, int points, float spiky, uint32_t seed, const float* c) {
-+    float px = 0, py = 0, fx = 0, fy = 0;
-+    float turn = Random(seed) * kPi2;
-+    for (int i = 0; i <= points; i++) {
-+        float x, y;
-+        if (i == points) {
-+            x = fx, y = fy;
-+        } else {
-+            float angle = turn + kPi2 * (float(i) + Random(seed) * 0.5f) / float(points);
-+            float radius = r * (0.55f + Random(seed) * 0.45f);
-+            if (Random(seed) < spiky) radius *= 1.6f + Random(seed) * 1.8f;
-+            x = cx + std::cos(angle) * radius, y = cy + std::sin(angle) * radius;
-+            if (i == 0) fx = x, fy = y;
-+        }
-+        if (i) BloodTri(o, cx, cy, px, py, x, y, c);
-+        px = x, py = y;
-+    }
-+}
-+
-+static void DrawBlood(X86Context& ctx, float unit) {
-+    uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
-+    float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
-+    float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
-+    static const uint32_t buffer = mem::AllocSystem(kBloodVertices * sizeof(Vertex), 16);
-+    static const uint32_t offset = mem::AllocSystem(8, 16);
-+    static const uint32_t colours = mem::AllocSystem(kBloodVertices * 4 * sizeof(float), 16);
-+    BloodOut o;
-+    o.first = o.v = static_cast<Vertex*>(HostPtr(buffer));
-+    o.end = o.first + kBloodVertices;
-+    o.colour = static_cast<float*>(HostPtr(colours));
-+    auto now = std::chrono::steady_clock::now();
-+    for (Spurt& s : g_spurts) {
-+        if (!s.live) continue;
-+        float age = std::chrono::duration<float>(now - s.when).count();
-+        if (age > kBloodLife) {
-+            s.live = false;
-+            continue;
-+        }
-+        uint32_t seed = s.seed;
-+        int style = std::min(int(Random(seed) * 3), 2);  // 0 burst, 1 spray, 2 blob
-+        const float* main = kBloodColours[std::min(int(Random(seed) * 3), 2)];
-+        // each part has its own stream, so what is on screen never shifts the rest
-+        uint32_t splat = seed ^ 0x9E3779B9u, thrown = seed ^ 0x85EBCA6Bu, spikes = seed ^ 0xC2B2AE35u;
-+        // the splat's size: grows fast, holds, shrinks away at the end
-+        float grow = std::min(age / 0.10f, 1.0f);
-+        float fade = std::min((kBloodLife - age) / 0.5f, 1.0f);
-+        float scale = grow * fade;
-+        float centre[2], up[2];
-+        float above[3] = {s.at[0], s.at[1] + 0.5f, s.at[2]};
-+        bool seen = Project(s.at, vx, vy, vw, vh, centre) && Project(above, vx, vy, vw, vh, up);
-+        float ppm = seen ? std::sqrt((centre[0] - up[0]) * (centre[0] - up[0]) + (centre[1] - up[1]) * (centre[1] - up[1])) / 0.5f : 0;
-+        // per style: splat radius in metres, spike share, satellites, streaks, round drops, drips
-+        static const float kRadius[3] = {0.28f, 0.18f, 0.42f};
-+        static const float kSpiky[3] = {0.55f, 0.25f, 0.15f};
-+        static const int kSatellites[3] = {5, 3, 7};
-+        static const int kStreaks[3] = {22, 40, 10};
-+        static const int kRound[3] = {14, 18, 10};
-+        static const int kDrips[3] = {0, 0, 4};
-+        // the splat, its satellites and drips
-+        if (seen && ppm > 0 && scale > 0) {
-+            float r = std::min(ppm * kRadius[style], vh * 0.08f) * scale;  // capped: close up it would fill the screen
-+            BloodBlob(o, centre[0], centre[1], r, 16, kSpiky[style], splat, main);
-+            for (int i = 0; i < kSatellites[style]; i++) {
-+                float angle = Random(splat) * kPi2, dist = r * (1.3f + Random(splat) * 1.6f), size = r * (0.12f + Random(splat) * 0.25f);
-+                BloodBlob(o, centre[0] + std::cos(angle) * dist, centre[1] + std::sin(angle) * dist * 0.8f, size, 8, 0.1f, splat,
-+                          kBloodColours[std::min(int(Random(splat) * 3), 2)]);
-+            }
-+            for (int i = 0; i < kDrips[style]; i++) {
-+                float across = (Random(splat) - 0.5f) * r * 1.4f, length = r * (0.8f + Random(splat) * 1.6f);
-+                float run = std::min(age / 0.9f, 1.0f) * length;
-+                float width = r * (0.10f + Random(splat) * 0.08f);
-+                BloodQuad(o, centre[0] + across, centre[1], centre[0] + across, centre[1] + run, width, main);
-+                BloodBlob(o, centre[0] + across, centre[1] + run, width * 0.9f, 7, 0.0f, splat, main);
-+            }
-+        }
-+        // streaks and round drops thrown from the hit
-+        float dropAge = std::min(age, kDropLife);
-+        bool flying = age < kDropLife;
-+        float thrust = style == 1 ? 3.0f : 1.5f;
-+        for (int d = 0; d < kStreaks[style] + kRound[style]; d++) {
-+            bool streak = d < kStreaks[style];
-+            float angle = Random(thrown) * kPi2;
-+            float speed = 0.5f + Random(thrown) * (style == 1 ? 2.0f : 1.5f);
-+            float rise = 0.3f + Random(thrown) * 1.8f;
-+            float size = Random(thrown);
-+            const float* col = kBloodColours[std::min(int(Random(thrown) * 4), 3)];
-+            if (!flying) continue;
-+            float vel[3] = {std::cos(angle) * speed + s.away[0] * thrust, rise, std::sin(angle) * speed + s.away[1] * thrust};
-+            // never towards the player: that is what jumps at the screen. Mirror it to the far side
-+            float toward = vel[0] * s.away[0] + vel[2] * s.away[1];
-+            if (toward < 0) vel[0] -= 2 * toward * s.away[0], vel[2] -= 2 * toward * s.away[1];
-+            auto place = [&](float t, float out[3]) {
-+                out[0] = s.at[0] + vel[0] * t;
-+                out[1] = s.at[1] + vel[1] * t - 4.9f * t * t;
-+                out[2] = s.at[2] + vel[2] * t;
-+            };
-+            float head[3], a[2], b[2];
-+            place(dropAge, head);
-+            if (head[1] < s.at[1] - 1.2f) continue;  // it hit the ground
-+            if (!Project(head, vx, vy, vw, vh, b)) continue;
-+            if (streak) {
-+                float tail[3];
-+                place(std::max(dropAge - 0.06f, 0.0f), tail);
-+                if (!Project(tail, vx, vy, vw, vh, a)) continue;
-+                BloodQuad(o, a[0], a[1], b[0], b[1], kBloodThickness * unit * (0.5f + size * 1.5f), col);
-+            } else if (ppm > 0) {
-+                BloodBlob(o, b[0], b[1], ppm * (0.012f + size * 0.035f), 6, 0.0f, thrown + d, col);
-+            }
-+        }
-+        if (style == 0 && seen && ppm > 0 && scale > 0) {  // spikes of the burst, thin and long
-+            float r = ppm * kRadius[0] * scale;
-+            for (int i = 0; i < 14; i++) {
-+                float angle = Random(spikes) * kPi2, length = r * (1.4f + Random(spikes) * 2.6f), width = r * 0.07f;
-+                float tx = centre[0] + std::cos(angle) * length, ty = centre[1] + std::sin(angle) * length;
-+                float bx = centre[0] + std::cos(angle) * r * 0.5f, by = centre[1] + std::sin(angle) * r * 0.5f;
-+                BloodTri(o, bx - std::sin(angle) * width, by + std::cos(angle) * width, bx + std::sin(angle) * width,
-+                         by - std::cos(angle) * width, tx, ty, main);
-+            }
-+        }
-+    }
-+    if (o.v == o.first) return;
-+    W32(offset, 0);
-+    W32(offset + 4, 0);
-+    uint32_t eax = ctx.eax, ecx = ctx.ecx;
-+    ctx.eax = uint32_t(o.v - o.first) / 3;
-+    ctx.ecx = buffer;
-+    CallGuest(ctx, kTriangles, {offset, colours});
-+    ctx.eax = eax;
-+    ctx.ecx = ecx;
-+}
-+
-+// the minimap, top right: the ground walked through in this level (map.cpp keeps it), turned with the camera so up is
-+// ahead, with the player and the enemies in sight. The cells have the colours of their floor
-+static void DrawMap(X86Context& ctx, float unit) {
-+    if (!Opt().map_show) return;
-+    uint32_t me = R32(kWorld) + kWorldPlayer;
-+    float pos[3] = {G<float>(me + kCharPosition), G<float>(me + kCharPosition + 4), G<float>(me + kCharPosition + 8)};
-+    if (!std::isfinite(pos[0]) || !std::isfinite(pos[1]) || !std::isfinite(pos[2])) return;
-+    int level = int(Opt().spot_level);
-+    MapVisit(level, pos);
-+    // the camera's right and forward along the ground, from the view's columns
-+    float rx = g_view[0], rz = g_view[8], fx = g_view[2], fz = g_view[10];
-+    float rl = std::sqrt(rx * rx + rz * rz), fl = std::sqrt(fx * fx + fz * fz);
-+    if (!(rl > 0.001f) || !(fl > 0.001f)) return;
-+    rx /= rl, rz /= rl, fx /= fl, fz /= fl;
-+    uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
-+    float vx = float(R32(viewport)), vy = float(R32(viewport + 4)), vw = float(R32(viewport + 8));
-+    constexpr float kRange = 40.0f;  // metres from the player to the map's edge
-+    float half = 105.0f * unit, scale = half / kRange;
-+    float cx = vx + vw - half - 14.0f * unit, cy = vy + half + 44.0f * unit;
-+    static const uint32_t buffer = mem::AllocSystem(kBloodVertices * 2 * sizeof(Vertex), 16);
-+    static const uint32_t offset = mem::AllocSystem(8, 16);
-+    static const uint32_t colours = mem::AllocSystem(kBloodVertices * 2 * 4 * sizeof(float), 16);
-+    BloodOut o;
-+    o.first = o.v = static_cast<Vertex*>(HostPtr(buffer));
-+    o.end = o.first + kBloodVertices * 2;
-+    o.colour = static_cast<float*>(HostPtr(colours));
-+    static const float back[4] = {0.0f, 0.0f, 0.0f, 0.2f}, ground[4] = {0.6f, 0.7f, 0.8f, 0.45f};
-+    static const float self[4] = {1.0f, 1.0f, 1.0f, 1.0f}, foe[4] = {1.0f, 0.1f, 0.1f, 1.0f};
-+    BloodTri(o, cx - half, cy - half, cx + half, cy - half, cx - half, cy + half, back);
-+    BloodTri(o, cx + half, cy - half, cx + half, cy + half, cx - half, cy + half, back);
-+    // a point on the ground as (right, ahead) metres from the player, to the map's pixels
-+    auto Place = [&](float wx, float wz, float& px, float& py) {
-+        float dx = wx - pos[0], dz = wz - pos[2];
-+        float u = dx * rx + dz * rz, f = dx * fx + dz * fz;
-+        px = cx + u * scale, py = cy - f * scale;
-+        return std::fabs(u) <= kRange && std::fabs(f) <= kRange;
-+    };
-+    int floor = MapFloor(pos[1]);
-+    float cell = scale;  // half a cell (1 m), in pixels
-+    for (const MapCell& c : MapCells(level)) {
-+        if (c.floor != floor) continue;
-+        float px, py;
-+        if (!Place((float(c.x) + 0.5f) * 2.0f, (float(c.z) + 0.5f) * 2.0f, px, py)) continue;
-+        // the cell is a square turned with the view: its half sides along the world's x and z, on the map
-+        float xx = rx * cell, xy = -fx * cell, zx = rz * cell, zy = -fz * cell;
-+        BloodTri(o, px - xx - zx, py - xy - zy, px + xx - zx, py + xy - zy, px - xx + zx, py - xy + zy, ground);
-+        BloodTri(o, px + xx - zx, py + xy - zy, px + xx + zx, py + xy + zy, px - xx + zx, py - xy + zy, ground);
-+    }
-+    auto now = std::chrono::steady_clock::now();
-+    for (size_t i = 0; i < g_count; i++) {
-+        if (now - g_seen[i].at > kSeen || R32(g_seen[i].who + kCharDying)) continue;
-+        float px, py;
-+        if (!Place(G<float>(g_seen[i].who + kCharPosition), G<float>(g_seen[i].who + kCharPosition + 8), px, py)) continue;
-+        float r = 2.5f * unit;
-+        BloodTri(o, px - r, py - r, px + r, py - r, px - r, py + r, foe);
-+        BloodTri(o, px + r, py - r, px + r, py + r, px - r, py + r, foe);
-+    }
-+    float a = 5.0f * unit;  // the player: an arrow pointing up
-+    BloodTri(o, cx, cy - a, cx - a * 0.7f, cy + a * 0.7f, cx + a * 0.7f, cy + a * 0.7f, self);
-+    if (o.v == o.first) return;
-+    W32(offset, 0);
-+    W32(offset + 4, 0);
-+    uint32_t eax = ctx.eax, ecx = ctx.ecx;
-+    ctx.eax = uint32_t(o.v - o.first) / 3;
-+    ctx.ecx = buffer;
-+    CallGuest(ctx, kTriangles, {offset, colours});
-+    ctx.eax = eax;
-+    ctx.ecx = ecx;
-+}
-+
-+// the ESP's lines and the blood, between the 2D layer's begin and end
++// the ESP's lines, between the 2D layer's begin and end
 +void DrawEsp(X86Context& ctx, float unit) {
 +    if (!g_camera || !R32(kWorld)) return;
 +    if (Opt().esp) DrawLines(ctx, unit);
-+    if (Opt().blood) DrawBlood(ctx, unit);
-+    DrawMap(ctx, unit);
 +}
 +
 +}  // namespace game
@@ -1088,7 +778,7 @@ index 0000000..8672d9b
 +    __imp__sub_001DFD90(ctx, base);
 +}
 diff --git a/src/game/fps_counter.cpp b/src/game/fps_counter.cpp
-index a8369a1..42f615a 100644
+index a8369a1..861d40a 100644
 --- a/src/game/fps_counter.cpp
 +++ b/src/game/fps_counter.cpp
 @@ -19,6 +19,10 @@ using flash::kClipNext;
@@ -1107,7 +797,7 @@ index a8369a1..42f615a 100644
      std::optional<float> slide = title ? LegendSlide(*title) : std::nullopt;
      bool watermark = slide.has_value();
 -    if (!(fps || watermark) || !font || !(h > 0)) return;
-+    bool esp = game::Opt().esp || game::Opt().blood || game::Opt().map_show;
++    bool esp = game::Opt().esp;
 +    if (!(fps || watermark || esp) || !font || !(h > 0)) return;
      View view{h / 480, w / h / game::Aspect()};
      float& width = G<float>(font + kFontScale);
@@ -1263,126 +953,6 @@ index 2b1a307..60a0045 100644
  constexpr uint32_t kGunDrawList = 5;  // the first person models
  // draw list
  constexpr uint32_t kDrawListSize = 0x18;
-diff --git a/src/game/map.cpp b/src/game/map.cpp
-new file mode 100644
-index 0000000..d6d5682
---- /dev/null
-+++ b/src/game/map.cpp
-@@ -0,0 +1,92 @@
-+// The minimap's memory: a cell of the ground is kept once the player stood on or beside it, per level and floor, in
-+// map_<level>.bin beside the game (written every few seconds), so the map of a level fills in as it is played
-+#ifndef WIN32_LEAN_AND_MEAN
-+#define WIN32_LEAN_AND_MEAN
-+#endif
-+#ifndef NOMINMAX
-+#define NOMINMAX
-+#endif
-+#include <windows.h>
-+
-+#include <chrono>
-+#include <cmath>
-+#include <cstdint>
-+#include <cstdio>
-+#include <filesystem>
-+#include <map>
-+#include <set>
-+
-+#include "game/map.h"
-+
-+namespace game {
-+namespace {
-+
-+constexpr float kCell = 2.0f;  // metres
-+constexpr float kFloor = 3.0f;
-+
-+struct Level {
-+    std::set<uint64_t> keys;
-+    std::vector<MapCell> cells;
-+    bool dirty = false;
-+};
-+std::map<int, Level> g_levels;
-+std::chrono::steady_clock::time_point g_saved;
-+
-+uint64_t Key(int x, int z, int f) { return (uint64_t(uint32_t(x)) << 32) ^ (uint64_t(uint16_t(z)) << 16) ^ uint16_t(f); }
-+
-+std::filesystem::path File(int level) {
-+    wchar_t path[MAX_PATH];
-+    GetModuleFileNameW(nullptr, path, MAX_PATH);
-+    return std::filesystem::path(path).parent_path() / (L"map_" + std::to_wstring(level) + L".bin");
-+}
-+
-+void Add(Level& l, int x, int z, int f) {
-+    if (l.keys.insert(Key(x, z, f)).second) l.cells.push_back({x, z, f}), l.dirty = true;
-+}
-+
-+Level& Get(int level) {
-+    auto it = g_levels.find(level);
-+    if (it != g_levels.end()) return it->second;
-+    Level& l = g_levels[level];
-+    if (FILE* f = _wfopen(File(level).c_str(), L"rb")) {
-+        int32_t c[3];
-+        while (std::fread(c, sizeof(c), 1, f) == 1) Add(l, c[0], c[1], c[2]);
-+        std::fclose(f);
-+    }
-+    l.dirty = false;
-+    return l;
-+}
-+
-+void Save(int level, Level& l) {
-+    if (FILE* f = _wfopen(File(level).c_str(), L"wb")) {
-+        for (const MapCell& c : l.cells) {
-+            int32_t v[3] = {c.x, c.z, c.floor};
-+            std::fwrite(v, sizeof(v), 1, f);
-+        }
-+        std::fclose(f);
-+    }
-+    l.dirty = false;
-+}
-+
-+}  // namespace
-+
-+int MapFloor(float y) { return int(std::floor((y + 1.5f) / kFloor)); }
-+
-+void MapVisit(int level, const float pos[3]) {
-+    Level& l = Get(level);
-+    int x = int(std::floor(pos[0] / kCell)), z = int(std::floor(pos[2] / kCell)), f = MapFloor(pos[1]);
-+    Add(l, x, z, f);  // and the four beside it: a trail a few metres wide
-+    Add(l, x + 1, z, f), Add(l, x - 1, z, f), Add(l, x, z + 1, f), Add(l, x, z - 1, f);
-+    auto now = std::chrono::steady_clock::now();
-+    if (l.dirty && now - g_saved > std::chrono::seconds(5)) g_saved = now, Save(level, l);
-+}
-+
-+const std::vector<MapCell>& MapCells(int level) { return Get(level).cells; }
-+
-+void MapClear(int level) {
-+    Level& l = Get(level);
-+    l.keys.clear(), l.cells.clear();
-+    Save(level, l);
-+}
-+
-+}  // namespace game
-diff --git a/src/game/map.h b/src/game/map.h
-new file mode 100644
-index 0000000..6f5d33e
---- /dev/null
-+++ b/src/game/map.h
-@@ -0,0 +1,16 @@
-+#pragma once
-+#include <vector>
-+
-+namespace game {
-+
-+// the minimap draws itself: the cells (2 m, by floor) the player has walked through in each level, kept in map_<level>.bin
-+struct MapCell {
-+    int x, z, floor;
-+};
-+
-+void MapVisit(int level, const float pos[3]);
-+const std::vector<MapCell>& MapCells(int level);
-+void MapClear(int level);
-+int MapFloor(float y);
-+
-+}  // namespace game
 diff --git a/src/game/mouse.cpp b/src/game/mouse.cpp
 index c3b6803..e5cba64 100644
 --- a/src/game/mouse.cpp
